@@ -1,0 +1,13 @@
+# Target labels
+ bootloader
+# Source files and their labels
+/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/CMakeFiles/bootloader
+/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/CMakeFiles/bootloader.rule
+/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/CMakeFiles/bootloader-complete.rule
+/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/bootloader-prefix/src/bootloader-stamp/bootloader-build.rule
+/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/bootloader-prefix/src/bootloader-stamp/bootloader-configure.rule
+/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/bootloader-prefix/src/bootloader-stamp/bootloader-download.rule
+/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/bootloader-prefix/src/bootloader-stamp/bootloader-install.rule
+/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/bootloader-prefix/src/bootloader-stamp/bootloader-mkdir.rule
+/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/bootloader-prefix/src/bootloader-stamp/bootloader-patch.rule
+/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/bootloader-prefix/src/bootloader-stamp/bootloader-update.rule
