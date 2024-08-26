@@ -83,14 +83,14 @@ esp_err_t Main::init(void){
 void Main::loop(void){
 
 
-    printf("Main task\n");
-    ntpTime.print();
+    //printf("Main task\n");
+    //ntpTime.print();
     ntpTime.espTimerUptime = (esp_timer_get_time()/1000000);
 
-    ESP_LOGI("TIME", "TIME SINCE STARTUP: %ld",ntpTime.espTimerUptime);
+    //ESP_LOGI("TIME", "TIME SINCE STARTUP: %ld",ntpTime.espTimerUptime);
 
-    time_t rtcTime = ntpTime.getCurrentRTCTime(false);
-    ntpTime.dbgLogLocalTimeT(rtcTime);
+    //time_t rtcTime = ntpTime.getCurrentRTCTime(false);
+    //ntpTime.dbgLogLocalTimeT(rtcTime);
 
     vTaskDelay(1000 / portTICK_PERIOD_MS);
     fflush(stdout);
