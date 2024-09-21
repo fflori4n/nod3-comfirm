@@ -4,9 +4,11 @@ namespace NETWORK
 {
     /* static member init */
     Wlan::tWlanState Wlan::_wlanIfaceState{Wlan::tWlanState::wlanState_notInitialised};
-    std::mutex Wlan::initLock_mutex{};
+    std::mutex Wlan::wifi_driver_mutex{};
+    std::mutex Wlan::wifi_driver_callback_mutex{};
     wifi_init_config_t Wlan::_wifiInitCfg = WIFI_INIT_CONFIG_DEFAULT();
     wifi_config_t Wlan::_wifiConfig{};
+    Wlan::wifi_power_save_e Wlan::wifi_power_save_mode{Wlan::wifi_power_save_e::psave_maximum};
 
 Wlan::Wlan(){
     ESP_LOGI(logLabel,"WLAN constructor called.");
@@ -16,13 +18,23 @@ Wlan::Wlan(){
 /* FROM: https://www.youtube.com/watch?v=3dM6LiAriEg */ 
 esp_err_t Wlan::init(void){
 
-    std::lock_guard<std::mutex> guard(initLock_mutex);
+    std::lock_guard<std::mutex> guard(wifi_driver_mutex);
     esp_err_t retStatus = ESP_OK;
 
     if( tWlanState::wlanState_notInitialised == _wlanIfaceState){
 
         retStatus = esp_netif_init();
         /*esp_event_loop_create_default()*/
+
+        /* register wifi event handler functions */
+        if (ESP_OK == retStatus)
+        {
+            retStatus = esp_event_handler_instance_register(WIFI_EVENT,ESP_EVENT_ANY_ID,&_wifiEventHandler,nullptr,nullptr);
+        }
+        if (ESP_OK == retStatus)
+        {
+            retStatus = esp_event_handler_instance_register(IP_EVENT,ESP_EVENT_ANY_ID,&_wifiEventHandler,nullptr,nullptr);
+        }
 
         if(ESP_OK == retStatus){
             const esp_netif_t* const p_netif = esp_netif_create_default_wifi_sta();
@@ -35,6 +47,13 @@ esp_err_t Wlan::init(void){
         if(ESP_OK == retStatus){
             _wifiInitCfg = WIFI_INIT_CONFIG_DEFAULT(); /*@TODO: set at compile to be default.*/
             retStatus = esp_wifi_init(&_wifiInitCfg);
+           
+        }
+        /* set WIFI power saving mode - more saving slower response */
+        if(ESP_OK == retStatus){
+
+            const wifi_ps_type_t power_mode{static_cast<wifi_ps_type_t>(wifi_power_save_mode)};
+            retStatus = esp_wifi_set_ps(power_mode);
         }
 
         if(ESP_OK == retStatus){
@@ -49,20 +68,11 @@ esp_err_t Wlan::init(void){
             memcpy(_wifiConfig.sta.ssid, wlanSSID, std::min(strlen(wlanSSID), sizeof(_wifiConfig.sta.ssid)));
             memcpy(_wifiConfig.sta.password, wlanPassword, std::min(strlen(wlanPassword),sizeof(_wifiConfig.sta.password)));
 
-            /*_wifiConfig.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK,
-            _wifiConfig.sta.pmf_cfg.capable     = true;
-            _wifiConfig.sta.pmf_cfg.required    = false;*/ /* Works fine without this crap in example */
-
-             /* register wifi event handler functions */
-            esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, _wifiEventHandler, NULL);
-            esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, _wifiEventHandler, NULL);
-            
         }
 
-        if(ESP_OK == retStatus){
-             
+        if(ESP_OK == retStatus)
+        {
             esp_wifi_set_config(WIFI_IF_STA, &_wifiConfig);
-
         }
 
         _wlanIfaceState = tWlanState::wlanState_initCompleted;
@@ -90,6 +100,33 @@ esp_err_t Wlan::begin(void){
     return retStatus;
 }
 
+esp_err_t Wlan::disconnect_power_off(void){
+
+    esp_err_t retStatus = ESP_OK;
+
+    if(tWlanState::wlanState_notInitialised != _wlanIfaceState){
+
+        std::lock_guard<std::mutex> guard(wifi_driver_mutex);
+
+        retStatus = esp_wifi_disconnect();  /* Graceful disconnect from AP, or NOT connceted/ No init return if not connected*/
+        _wlanIfaceState = tWlanState::wlanState_disconnected;
+
+        if(ESP_FAIL != retStatus)
+        {
+            esp_wifi_stop();    /* stop STA mode, dont care about return*/
+            _wlanIfaceState = tWlanState::wlanState_initCompleted;
+            //esp_wifi_deinit();  /* clear init and stop wifi task - next time, init is needed again.*/
+            retStatus = ESP_OK;
+        }
+        else
+        {
+            /* @TODO: go to error?? or keep last state?*/
+        }
+    }
+    
+    return retStatus;
+}
+
 esp_err_t Wlan::begin(char* ssid, char* passwd){
 
 
@@ -97,32 +134,99 @@ esp_err_t Wlan::begin(char* ssid, char* passwd){
     return this->begin();
 }
 
+/* TODO: not very memory efficient but convinient to avoid char* vs const char* issues */
+/* this also does not work when one argument is const char, the other is not. so consider casting?? other option to avoid casting random crap??*/
+template<typename cstr_type>
+esp_err_t Wlan::sta_connect(cstr_type* &ssid, cstr_type* &passwd) {
+
+  ESP_LOGI("WLAN","ssid: %s, passwd: %s", ssid, passwd);
+
+  return ESP_FAIL;
+}
+
 
 void Wlan::_wifiEventHandler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id,void *event_data){
 
-    if(event_id == WIFI_EVENT_STA_START)
-    {
-        _wlanIfaceState = tWlanState::wlanState_connecting;
-        ESP_LOGI("WLAN_EVENT","Connecting : STA start");
-    }
-    else if (event_id == WIFI_EVENT_STA_CONNECTED)
-    {
-        _wlanIfaceState = tWlanState::wlanState_waitingForIP;
-        ESP_LOGI("WLAN_EVENT","Connecting : waiting for IP");
-    }
-    else if (event_id == IP_EVENT_STA_GOT_IP)
-    {
-        _wlanIfaceState = tWlanState::wlanState_connected;
-        ESP_LOGI("WLAN_EVENT","Is connected : got IP");
-    }
-    else if (event_id == WIFI_EVENT_STA_DISCONNECTED)
-    {
-        _wlanIfaceState = tWlanState::wlanState_disconnected;
-        ESP_LOGI("WLAN_EVENT","Disconnected");
+    /* no multiple events at the same time.*/
+    std::lock_guard<std::mutex> guard(wifi_driver_callback_mutex);
+    /* NOTE: _wlanIfaceState is protected by this different mutex, so also need this.*/
+    std::lock_guard<std::mutex> lock(wifi_driver_mutex);
+
+    if(IP_EVENT == event_base){
+
+        const ip_event_t event_type{static_cast<ip_event_t>(event_id)};
+
+        switch(event_type)
+        {
+        case IP_EVENT_STA_GOT_IP:
+        {
+            _wlanIfaceState = tWlanState::wlanState_connected;
+            ESP_LOGI("WLAN_EVENT","Is connected : got IP");
+            break;
+        }
+
+        case IP_EVENT_STA_LOST_IP:
+        {
+            _wlanIfaceState = tWlanState::wlanState_waitingForIP;
+            ESP_LOGI("WLAN_EVENT","IP lost : waiting for IP");
+            break;
+        }
+
+        default:
+            ESP_LOGW("WLAN_EVENT","unexpected IP EVENT type: %d",event_type);
+            break;
+        }
+
+    }else if(WIFI_EVENT == event_base){
+        const wifi_event_t event_type{static_cast<wifi_event_t>(event_id)};
+
+        switch(event_type)
+        {
+        case WIFI_EVENT_STA_START:
+        {
+            _wlanIfaceState = tWlanState::wlanState_connecting;
+            ESP_LOGI("WLAN_EVENT","Connecting : STA start");
+            break;
+        }
+
+        case WIFI_EVENT_STA_CONNECTED:
+        {
+            _wlanIfaceState = tWlanState::wlanState_waitingForIP;
+            ESP_LOGI("WLAN_EVENT","Connecting : waiting for IP");
+            break;
+        }
+
+        case WIFI_EVENT_HOME_CHANNEL_CHANGE:
+        {
+            ESP_LOGI("WLAN_EVENT","Home channel change");
+            break;
+        }
+
+        case WIFI_EVENT_SCAN_DONE:
+        {
+            ESP_LOGI("WLAN_EVENT","Scan done!");
+            break;
+        }
+
+        case WIFI_EVENT_STA_DISCONNECTED:
+        {
+            ESP_LOGI("WLAN_EVENT","STA disconnected");
+            break;
+        }
+
+        case WIFI_EVENT_STA_STOP:
+        {
+            ESP_LOGI("WLAN_EVENT","STA stopped");
+            break;
+        }
+
+        default:
+            ESP_LOGW("WLAN_EVENT","unexpected WIFI EVENT type: %d",event_type);
+            break;
+        }
     }
     else{
-        /*_wlanIfaceState = tWlanState::wlanState_error;*/
-        ESP_LOGI("WLAN_EVENT","Undefined event");
+        ESP_LOGI("WLAN_EVENT","unexpected callback type: %s",event_base);
     }
 }
 
@@ -192,8 +296,38 @@ esp_err_t Wlan::fastScan(void){
         ESP_ERROR_CHECK(esp_wifi_scan_get_ap_num(&ap_count));
         ESP_ERROR_CHECK(esp_wifi_scan_get_ap_records(&number, ap_info));
         ESP_LOGI(TAG, "Total APs scanned = %u, actual AP number ap_info holds = %u", ap_count, number);
+        
+        constexpr char* auth_mode_log_str[] = {
+                "OPEN",             /**< authenticate mode : open */
+                "WEP",              /**< authenticate mode : WEP */
+                "WPA_PSK",          /**< authenticate mode : WPA_PSK */
+                "WPA2_PSK",         /**< authenticate mode : WPA2_PSK */
+                "WPA_WPA2_PSK",     /**< authenticate mode : WPA_WPA2_PSK */
+                "ENTERPRISE",       /**< authenticate mode : WiFi EAP security */
+                "WPA2_ENTERPRISE",  /**< authenticate mode : WiFi EAP security */
+                "WPA3_PSK",         /**< authenticate mode : WPA3_PSK */
+                "WPA2_WPA3_PSK",    /**< authenticate mode : WPA2_WPA3_PSK */
+                "WAPI_PSK",         /**< authenticate mode : WAPI_PSK */
+                "OWE",              /**< authenticate mode : OWE */
+                "WPA3_ENT_192",     /**< authenticate mode : WPA3_ENT_SUITE_B_192_BIT */
+                "WPA3_EXT_PSK",     /**< this authentication mode will yield same result as WIFI_AUTH_WPA3_PSK and not recommended to be used. It will be deprecated in future, please use WIFI_AUTH_WPA3_PSK instead. */
+                "WPA3_EXT_PSK_MIXED_MODE", /**< this authentication mode will yield same result as WIFI_AUTH_WPA3_PSK and not recommended to be used. It will be deprecated in future, please use WIFI_AUTH_WPA3_PSK instead.*/
+                "DPP"              /**< authenticate mode : DPP */
+        };
+
         for (int i = 0; i < number; i++) {
-            ESP_LOGI("", "SSID %s\t\t\t RSSI %d CH: \t\t%d", ap_info[i].ssid, ap_info[i].rssi, ap_info[i].primary);
+
+            char mac_cstr[12+5+1]{'\0'};
+            snprintf(mac_cstr, sizeof(mac_cstr), "%02x:%02x:%02x:%02x:%02x:%02x",
+                ap_info[i].bssid[0],
+                ap_info[i].bssid[1],
+                ap_info[i].bssid[2],
+                ap_info[i].bssid[3],
+                ap_info[i].bssid[4],
+                ap_info[i].bssid[5]
+            );
+            
+            ESP_LOGI("", "%s -- %-33s %-23s RSSI %d CH: %02d FTM:%d/%d",mac_cstr, ap_info[i].ssid, auth_mode_log_str[(ap_info[i].authmode)], ap_info[i].rssi, ap_info[i].primary, ap_info[i].ftm_initiator, ap_info[i].ftm_responder);
         } 
     }
 
@@ -208,9 +342,25 @@ void task_manageWlanConnection(void *parameters){
         wifiIF.begin();
 
         for(;;){
-            vTaskDelay(5000 / portTICK_PERIOD_MS);
-            wifiIF.fastScan();
-            /*printf("MAC: %s\n", wifiIF.getMACAddressCStr());*/
+            
+            for(uint16_t i=0; i< (30000/5000); i++){
+                vTaskDelay(5000 / portTICK_PERIOD_MS);
+                wifiIF.fastScan();
+            }
+
+            wifi_ap_record_t ap;
+            esp_wifi_sta_get_ap_info(&ap);
+            printf("%d\n", ap.rssi);
+            printf("FTM responder %d\n", ap.ftm_responder);
+            printf("FTM initiator %d\n", ap.ftm_initiator);
+
+            wifiIF.disconnect_power_off();
+            vTaskDelay(20000 / portTICK_PERIOD_MS);
+            wifiIF.begin();
+
+            const char* ssid{"ssid"};
+            const char* pass{"pass"};
+            wifiIF.sta_connect(ssid, pass);
         }  
 }
 

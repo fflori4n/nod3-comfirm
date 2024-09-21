@@ -41,8 +41,15 @@ namespace NETWORK
                 wlanState_error
             };
 
-            constexpr static const char* wlanSSID{"TS-uG65"};
-            constexpr static const char* wlanPassword{"4XfuPgEx"};
+            enum class wifi_power_save_e{
+
+                psave_disabled = WIFI_PS_NONE,
+                psave_default = WIFI_PS_MIN_MODEM,
+                psave_maximum = WIFI_PS_MAX_MODEM
+            };
+
+            constexpr static const char* wlanSSID/*{"GGGGG"}*/{"adsl sandor"}/*{"TS-uG65"}*/;
+            constexpr static const char* wlanPassword/*{"123456789"}*/{"floriflori"}/*{"4XfuPgEx"}*/;
 
         private:
             char macAddressCStr[12+1]{};
@@ -50,12 +57,15 @@ namespace NETWORK
             static wifi_init_config_t _wifiInitCfg;
             static wifi_config_t _wifiConfig;
         public:
-
+            static wifi_power_save_e wifi_power_save_mode;
             constexpr static char* logLabel{"NETWORK"};
             static uint64_t macAddress;
             
 
-            static std::mutex initLock_mutex;
+            static std::mutex wifi_driver_mutex;
+            /* Maybe it makes sense to use a separate mutex for callbacks because they are async compred to main task. */
+            static std::mutex wifi_driver_callback_mutex;
+            
 
         private:
             static esp_err_t _init(void);
@@ -72,6 +82,8 @@ namespace NETWORK
             /*void fast_scan(void)*/
             esp_err_t begin(void);
             esp_err_t begin(char* ssid, char* passwd);
+            template<typename cstr_type> esp_err_t sta_connect(cstr_type* &ssid, cstr_type* &passwd);
+            esp_err_t disconnect_power_off(void);
             
             esp_err_t loadMACAddress(void);
             esp_err_t fastScan(void);

@@ -76,6 +76,9 @@ esp_err_t Main::init(void){
     0
   );
 
+    constexpr uint32_t sntp_sync_seconds{30*60*1000};
+    ntpTime.sntp_init("pool.ntp.org", 10000, sntp_sync_seconds);
+
     return (esp_err_t)ESP_OK;
 
 }
@@ -86,11 +89,12 @@ void Main::loop(void){
     //printf("Main task\n");
     //ntpTime.print();
     ntpTime.espTimerUptime = (esp_timer_get_time()/1000000);
+    
 
     //ESP_LOGI("TIME", "TIME SINCE STARTUP: %ld",ntpTime.espTimerUptime);
 
-    //time_t rtcTime = ntpTime.getCurrentRTCTime(false);
-    //ntpTime.dbgLogLocalTimeT(rtcTime);
+    time_t rtcTime = ntpTime.getCurrentRTCTime(false);
+    ntpTime.dbgLogLocalTimeT(rtcTime);
 
     vTaskDelay(1000 / portTICK_PERIOD_MS);
     fflush(stdout);
