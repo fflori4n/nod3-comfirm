@@ -15,6 +15,7 @@
 
 #include "ntp_time/ntp_time.cpp"
 #include "network_manager/network_manager.cpp"
+#include "cron_scheduler/cron_scheduler.cpp"
 
 class Main final{
 public:

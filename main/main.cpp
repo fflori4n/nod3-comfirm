@@ -96,6 +96,13 @@ void Main::loop(void){
     time_t rtcTime = ntpTime.getCurrentRTCTime(false);
     ntpTime.dbgLogLocalTimeT(rtcTime);
 
+    Cron_Scheduler job_scheduler;
+
+    cron_job_t test_job = {cjob_status_t::cjob_unprocessed, 0, "", 0};
+    if(job_scheduler.is_ready_to_execute(test_job)){
+        ESP_LOGI("SCHEDULER", "RETURNED TRUE");
+    }
+
     vTaskDelay(1000 / portTICK_PERIOD_MS);
     fflush(stdout);
     return;
