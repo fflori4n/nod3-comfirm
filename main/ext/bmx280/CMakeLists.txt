@@ -1,4 +1,4 @@
 set(SOURCES )
-idf_component_register(SRCS "cron_scheduler.cpp"
+idf_component_register(SRCS "bmx280.c"
                         INCLUDE_DIRS .
                         REQUIRES lwip )

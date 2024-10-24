@@ -48,8 +48,8 @@ namespace NETWORK
                 psave_maximum = WIFI_PS_MAX_MODEM
             };
 
-            constexpr static const char* wlanSSID/*{"GGGGG"}*/{"adsl sandor"}/*{"TS-uG65"}*/;
-            constexpr static const char* wlanPassword/*{"123456789"}*/{"floriflori"}/*{"4XfuPgEx"}*/;
+            constexpr static const char* wlanSSID/*{"GGGGG"}*//*{"adsl sandor"}*/{"TS-uG65"};
+            constexpr static const char* wlanPassword/*{"123456789"}*//*{"floriflori"}*/{"4XfuPgEx"};
 
         private:
             char macAddressCStr[12+1]{};

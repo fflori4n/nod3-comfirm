@@ -1,54 +1,96 @@
 #include "ntp_time.h"
 
 esp_sntp_config_t Ntp_time::sntp_config = ESP_NETIF_SNTP_DEFAULT_CONFIG("pool.ntp.org");
+time_t Ntp_time::unixTimeNow{time(nullptr)};
+time_t Ntp_time::esp_uptime{0};
+time_t Ntp_time::unixRTCTimeLastUpdatedAt{time(nullptr)};
 
 Ntp_time::Ntp_time(void){
 
     time(&unixTimeNow);
-    // Set timezone to China Standard Time
     setenv("TZ", time_zone_tz_code, 1);
     tzset();
 
-    localtime_r(&unixTimeNow, &tmCurrentTime);
-    strftime(strftimeBuffer, sizeof(strftimeBuffer), "%c", &tmCurrentTime);
-    ESP_LOGI("YM", "The current date/time in Shanghai is: %s", strftimeBuffer);
+    Ntp_time::print_current_time();
 }
 
-void Ntp_time::print(void){
+esp_err_t Ntp_time::evaluate_rtc_time_validity(time_t& unix_time){
 
-    time(&unixTimeNow);
-    setenv("TZ", time_zone_tz_code, 1);
-    tzset();
-    localtime_r(&unixTimeNow, &tmCurrentTime);
-    strftime(strftimeBuffer, sizeof(strftimeBuffer), "%c", &tmCurrentTime);
-    ESP_LOGI("YM", "The current date/time in Shanghai is: %s", strftimeBuffer);
+    /* NOTE: ESP32 NTP client blocks sync for 15sec after update/recieving response from server */
+
+    if((Ntp_time::unixRTCTimeLastUpdatedAt > unix_time) || (Ntp_time::unix_time_anno_domini >= unix_time))
+    {
+        ESP_LOGW("TIME", "Time invalid, needs update: %lld", unix_time);
+        return ESP_FAIL;
+    }
+    ESP_LOGI("TIME", "Unix: %lld, last updated: %lld", Ntp_time::unixTimeNow,Ntp_time::unixRTCTimeLastUpdatedAt);
+    return ESP_OK;
 }
 
-time_t Ntp_time::getCurrentRTCTime(bool timeNonValidReturn){
+esp_err_t Ntp_time::rtc_time_check(){
+    time(&(Ntp_time::unixTimeNow));
+    return Ntp_time::evaluate_rtc_time_validity(Ntp_time::unixTimeNow);
+}
 
-    time_t rtcTime = time(NULL);
-    /*time(&rtcTime);*/
+time_t Ntp_time::get_esp_rtc_time(){
 
-    ESP_LOGI("TIME","%lld",rtcTime);
+    time(&(Ntp_time::unixTimeNow));
+    ESP_LOGI("TIME", "Unix: %lld", Ntp_time::unixTimeNow);
 
-    if((true == timeNonValidReturn) || (Ntp_time::unix_time_anno_domini < rtcTime)){
-        return rtcTime;
+    return Ntp_time::unixTimeNow;
+}
+
+time_t Ntp_time::get_valid_esp_rtc_time(){
+
+    time(&(Ntp_time::unixTimeNow));
+    if(ESP_OK == evaluate_rtc_time_validity(Ntp_time::unixTimeNow)){
+        return Ntp_time::unixTimeNow;
+    }
+
+    return (time_t)0;
+}
+
+void Ntp_time::print_current_time(){
+
+    time_t unix_time = get_esp_rtc_time();
+
+    char strftimeBuffer[64] = {'\0'};
+    struct tm tmCurrentTime;
+
+    localtime_r(&unix_time, &tmCurrentTime);
+    strftime(strftimeBuffer, sizeof(strftimeBuffer), "%c", &tmCurrentTime);
+    
+    if(ESP_OK == evaluate_rtc_time_validity(unix_time))
+    {
+        ESP_LOGI("TIME_RTC", "Uptime: %lld, Unix: %lld, Local: %s",Ntp_time::esp_uptime, unix_time, strftimeBuffer);
     }
     else{
-        return (time_t)0;
+        ESP_LOGI("TIME_RTC", "Uptime: %lld, Unix: %lld, Local: %s, [ Wr ] time is not valid!",Ntp_time::esp_uptime, unix_time, strftimeBuffer);
     }
+    
+    return;
 }
 
-void Ntp_time::dbgLogLocalTimeT(time_t& rtcTime){
+void Ntp_time::print_time(time_t& unix_time){
 
-    localtime_r(&rtcTime, &tmCurrentTime);
+    localtime_r(&unix_time, &tmCurrentTime);
     strftime(strftimeBuffer, sizeof(strftimeBuffer), "%c", &tmCurrentTime);
-    ESP_LOGI("TIME_RTC", "Unix: %lld, Local: %s",rtcTime, strftimeBuffer);
+    ESP_LOGI("TIME_RTC", "Uptime: %lld, Unix: %lld, Local: %s",Ntp_time::esp_uptime, unix_time, strftimeBuffer);
+    return;
 }
 
 void time_sync_notification_cb(struct timeval *tv)
 {
-    ESP_LOGW("TIME_SYNC_CB", "Notification of a time synchronization event");
+    
+    ESP_LOGW("TIME_SYNC_CB", "Time sync callback");
+    Ntp_time::print_current_time();
+
+    time_t new_rtc_update_time = Ntp_time::get_valid_esp_rtc_time();
+    if(((time_t)0) != new_rtc_update_time){
+        Ntp_time::unixRTCTimeLastUpdatedAt = new_rtc_update_time;
+    }
+
+    return;
 }
 /* NOTE: for some external source sync e.g. GNSS use:
 
@@ -98,9 +140,7 @@ esp_err_t Ntp_time::sntp_init(const char* sntp_server_url, const uint32_t wait_s
         }
     }
    
-
     return init_result;
-    
 }
 
 

@@ -345,7 +345,7 @@ void task_manageWlanConnection(void *parameters){
             
             for(uint16_t i=0; i< (30000/5000); i++){
                 vTaskDelay(5000 / portTICK_PERIOD_MS);
-                wifiIF.fastScan();
+                /*wifiIF.fastScan();*/
             }
 
             wifi_ap_record_t ap;
@@ -354,9 +354,9 @@ void task_manageWlanConnection(void *parameters){
             printf("FTM responder %d\n", ap.ftm_responder);
             printf("FTM initiator %d\n", ap.ftm_initiator);
 
-            wifiIF.disconnect_power_off();
+           /*wifiIF.disconnect_power_off();
             vTaskDelay(20000 / portTICK_PERIOD_MS);
-            wifiIF.begin();
+            wifiIF.begin();*/
 
             const char* ssid{"ssid"};
             const char* pass{"pass"};

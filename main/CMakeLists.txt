@@ -7,4 +7,5 @@ idf_component_register(SRCS "main.cpp"
                     esp_timer
                     esp_wifi
                     esp_netif
-                    lwip)
+                    lwip
+                    driver)
