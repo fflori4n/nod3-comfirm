@@ -48,8 +48,8 @@ namespace NETWORK
                 psave_maximum = WIFI_PS_MAX_MODEM
             };
 
-            constexpr static const char* wlanSSID/*{"GGGGG"}*//*{"adsl sandor"}*/{"TS-uG65"};
-            constexpr static const char* wlanPassword/*{"123456789"}*//*{"floriflori"}*/{"4XfuPgEx"};
+            constexpr static const char* wlanSSID{"TS-uG65"};/*{"adsl sandor"}*//*;*/
+            constexpr static const char* wlanPassword{"4XfuPgEx"}/*{"floriflori"}*//**/;
 
         private:
             char macAddressCStr[12+1]{};
@@ -84,6 +84,8 @@ namespace NETWORK
             esp_err_t begin(char* ssid, char* passwd);
             template<typename cstr_type> esp_err_t sta_connect(cstr_type* &ssid, cstr_type* &passwd);
             esp_err_t disconnect_power_off(void);
+
+            static esp_err_t is_connected(void);
             
             esp_err_t loadMACAddress(void);
             esp_err_t fastScan(void);

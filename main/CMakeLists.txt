@@ -3,7 +3,7 @@ idf_component_register(SRCS "main.cpp"
                     REQUIRES freertos 
                     esp_common 
                     esp_event
-                    nvs_flash 
+                    nvs_flash
                     esp_timer
                     esp_wifi
                     esp_netif

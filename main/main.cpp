@@ -27,6 +27,11 @@ constexpr i2c_config_t i2c_cfg{
 
 bmx280_sensor ambient_bme280;
 ADC_input current_transformer_pin(ADC_UNIT_1,ADC_CHANNEL_4);
+Homeassistant_websocket ha_websoc;
+char* current_template = "{\"id\":%%d,\"type\":\"call_service\",\"domain\":\"websoc_sensor\",\"service\":\"acct_test_sens.set_values\",\"service_data\":%s}";
+char msg[2048];
+char mqtt_service_data_buffer[2048] = {};
+AC_current_measurement c0_current_sensor;
 
 extern "C" void app_main(void)
 {
@@ -59,7 +64,7 @@ esp_err_t Main::init(void){
 
     /* Print chip information */
     esp_chip_info_t chip_info;
-    uint32_t flash_size;
+    /*uint32_t flash_size;*/
     esp_chip_info(&chip_info);
     printf("This is %s chip with %d CPU core(s), %s%s%s%s, ",
            CONFIG_IDF_TARGET,
@@ -72,13 +77,13 @@ esp_err_t Main::init(void){
     unsigned major_rev = chip_info.revision / 100;
     unsigned minor_rev = chip_info.revision % 100;
     printf("silicon revision v%d.%d, ", major_rev, minor_rev);
-    if(esp_flash_get_size(NULL, &flash_size) != ESP_OK) {
+    /*if(esp_flash_get_size(NULL, &flash_size) != ESP_OK) {
         printf("Get flash size failed");
         return (esp_err_t)ESP_OK;
     }
 
     printf("%" PRIu32 "MB %s flash\n", flash_size / (uint32_t)(1024 * 1024),
-           (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embedded" : "external");
+           (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embedded" : "external");*/
 
     printf("Minimum free heap size: %" PRIu32 " bytes\n", esp_get_minimum_free_heap_size());
 
@@ -168,8 +173,18 @@ void Main::loop(void){
 
     //     ESP_LOGI("test", "Read Values: temp = %.2f, pres = %.2f, hum = %.2f", temp, pres, hum);
     
-    
-    ESP_LOGI("ADC0_READ", "%ld", current_transformer_pin.readAC_RMS(1000));
+    current_transformer_pin.readAC_RMS(c0_current_sensor, ntpTime, 1000);
+
+    c0_current_sensor.get_service_data(mqtt_service_data_buffer, 2048);
+    ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
+
+    ha_websoc.connectAndAuthSocket(5, 1500);
+    /*ha_websoc.ping(5, 2000);*/
+    snprintf(msg, 2048, current_template, mqtt_service_data_buffer);
+    ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
+    ha_websoc.disconnect();
+    /*ESP_LOGI("", "mutex: %d", txrx_buffer_mutex.try_lock());*/
+    /*vTaskDelay(10000/ portTICK_PERIOD_MS);*/
     /*current_transformer_pin.readAC_RMS_dma(1000);*/
     // adc1_config_width(ADC_WIDTH_BIT_12);
     // adc1_config_channel_atten((adc1_channel_t)ADC_CHANNEL_1, ADC_ATTEN_DB_11);
@@ -189,7 +204,7 @@ void Main::loop(void){
     // ESP_LOGI("ADC_READ", "%ld", adc_reading);
 
     // ambient_bme280.read();
-    vTaskDelay(2000/ portTICK_PERIOD_MS);
+    vTaskDelay(90000/ portTICK_PERIOD_MS);
     fflush(stdout);
     return;
 }

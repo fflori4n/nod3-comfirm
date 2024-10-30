@@ -1,6 +1,62 @@
 #include "driver/gpio.h"
 #include "driver/adc.h"
 
+class AC_current_measurement{
+
+    public:
+
+    static constexpr uint16_t sampling_period_ms{2000};
+
+    float ac_freq = 0;
+    float rms_current = 0;
+    float ideal_current = 0;
+    float current_high = 0;
+    float current_low = 0;
+    float signal_snr = 0;
+    float volt_amps = 0;
+    float volt_amp_hours = 0;
+
+    time_t last_measurement_time = 0;
+
+    enum class ac_current_sensor_status{
+
+        Not_available           = 0,
+        OK                      = 1,
+        E_no_freq               = 2,              
+        E_out_of_range          = 3,
+        W_overcurrent           = 4,
+        W_low_SNR               = 5
+    
+    };
+
+    ac_current_sensor_status sensor_status;
+
+    static constexpr char* ac_current_sts_str[] = {"Not available", "OK", "W:No freq. lock", "E:Out of range", "W:Overcurrent", "W:low SNR"};
+    static constexpr char* current_template = "{\"c0_ac_freq\":%d.%d,\"c0_rms_current\":%d.%d,\"c0_ideal_current\":%d.%d,\"c0_current_high\":%d.%d,\"c0_current_low\":%d.%d,\"c0_signal_snr\":%d.%d,\"c0_volt_amps\":%d.%d,\"c0_volt_amp_hours\":%d.%d,\"c0_sens_sts\":\"%s\"}";
+
+    int16_t get_fraction(float value){
+        return (abs(((int16_t)(value * 100)) % 100));
+    }
+
+    esp_err_t get_service_data(char* text_buffer, int16_t text_buffer_size){
+
+        int16_t res = snprintf(text_buffer, text_buffer_size, current_template, 
+        (int16_t)(ac_freq), get_fraction(ac_freq),
+        (int16_t)(rms_current), get_fraction(rms_current), 
+        (int16_t)(ideal_current), get_fraction(ideal_current),
+        (int16_t)(current_high), get_fraction(current_high),
+        (int16_t)(current_low), get_fraction(current_low),
+        (int16_t)(signal_snr), get_fraction(signal_snr),
+        (int16_t)(volt_amps), get_fraction(volt_amps),
+        (int16_t)(volt_amp_hours), get_fraction(volt_amp_hours),
+        ac_current_sts_str[(int8_t)sensor_status]);
+
+        if ((res < 0) || (res >= text_buffer_size)){
+            return ESP_FAIL;
+        }
+        return ESP_OK;
+    }
+};
 
 class ADC_input{
     private:
@@ -40,31 +96,7 @@ class ADC_input{
         return (init_value == filtered_value) ? raw_value : (((1.0 - average_param) * filtered_value) + (average_param * raw_value));
     }
 
-    /*uint32_t readAC_RMS_dma(uint32_t sample_time){
-
-        adc_digi_init_config_t adc_dma_config = {
-            .max_store_buf_size = 1024,
-            .conv_num_each_intr = 256,
-            .adc1_chan_mask = BIT(2) | BIT(3) | BIT(4),
-            .adc2_chan_mask = BIT(0),
-        };
-
-        ESP_ERROR_CHECK(adc_digi_initialize(&adc_dma_config));
-
-        adc_digi_configuration_t dig_cfg = {
-            .conv_limit_en = 0,
-            .conv_limit_num = 250,
-            .sample_freq_hz = 10 * 1000,
-            .conv_mode = ADC_CONV_MODE,
-            .format = ADC_OUTPUT_TYPE,
-        };
-        adc_digi_deinitialize();
-
-        return 0;
-
-    }*/
-
-    uint32_t readAC_RMS(uint32_t sample_time){
+    float readAC_RMS(AC_current_measurement& current_sensor, Ntp_time& esp_rtc_time, uint32_t sample_time){
 
         /* measurement */
 
@@ -208,6 +240,8 @@ class ADC_input{
 
         ac_frequency = 1000000.0/((end_measurement_time - end_signal_var_sample)*1.0/(zero_cross*1.0/2));
 
+        current_sensor.sensor_status = AC_current_measurement::ac_current_sensor_status::OK;
+
         if((ac_frequency >= (nominal_grid_frequency - allowed_grid_frequency_diff)) && (ac_frequency <= (nominal_grid_frequency + allowed_grid_frequency_diff))){
 
             rms_current_mA = linear_offset_calibration_point * (((adc_to_voltage_v/burden_resistor_r)*1000000) * sqrt((rms_accumlator*1.0)/rms_samples));
@@ -219,12 +253,34 @@ class ADC_input{
             rms_current_mA = 0;
             ideal_wave_current_mA = 0;
             power = 0;
+
+            current_sensor.sensor_status = AC_current_measurement::ac_current_sensor_status::E_no_freq;
         }
         
         ESP_LOGI("A4", "samples:%d, sampling time: %ld, baseline: %0.2f, variance: +%0.2f | -%0.2f", loop_count, (sample_time * 1000)/loop_count, adc_mean_baseline, positive_var_apprx, negative_var_apprx);
         ESP_LOGI("A4", "ppeak:%0.2f npeak:%0.2f DC base: %0.2f, diff:%0.2f",min, max, adc_mean_baseline, (max-min));
         ESP_LOGI("A4", "ideal/RMS ratio: %0.2f, amplitude/noise_floor ratio: %0.2f", rms_current_mA/ideal_wave_current_mA, ((max-min)/50));
         ESP_LOGI("A4", "freq: %0.2f, current: %0.2f, sine_current: %0.2f power: %0.2f",ac_frequency, rms_current_mA, ideal_wave_current_mA, power);
+
+        current_sensor.ac_freq = ac_frequency;
+        current_sensor.rms_current = rms_current_mA;
+        current_sensor.ideal_current = ideal_wave_current_mA;
+        current_sensor.signal_snr = (float)((max-min)/50);
+        current_sensor.volt_amps = power;
+
+        time_t current_time = esp_rtc_time.get_valid_esp_rtc_time();
+        time_t duration = 0;
+
+        if((0 != current_time) && (0 != current_sensor.last_measurement_time)){
+
+            duration = current_time - current_sensor.last_measurement_time;
+            current_sensor.volt_amp_hours += ((1.0F * current_sensor.volt_amps * duration) /(3600));
+
+        }
+        ESP_LOGI("A4", "duration: %0.2f, vah: %f",(float)duration,((current_sensor.volt_amps/1000) * (duration * (((float)1)/(1000 * 3600)))));
+        current_sensor.last_measurement_time = current_time;
+
+        
        
         return rms_current_mA;
     }

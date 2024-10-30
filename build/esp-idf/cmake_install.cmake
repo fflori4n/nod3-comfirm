@@ -34,12 +34,12 @@ endif()
 
 # Set default install directory permissions.
 if(NOT DEFINED CMAKE_OBJDUMP)
-  set(CMAKE_OBJDUMP "/home/ffsk/.espressif/tools/xtensa-esp-elf/esp-13.2.0_20240530/xtensa-esp-elf/bin/xtensa-esp32s3-elf-objdump")
+  set(CMAKE_OBJDUMP "/home/ffsk/.espressif/tools/riscv32-esp-elf/esp-14.2.0_20240906/riscv32-esp-elf/bin/riscv32-esp-elf-objdump")
 endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for the subdirectory.
-  include("/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/xtensa/cmake_install.cmake")
+  include("/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/riscv/cmake_install.cmake")
 endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
@@ -145,6 +145,11 @@ endif()
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for the subdirectory.
   include("/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/soc/cmake_install.cmake")
+endif()
+
+if(NOT CMAKE_INSTALL_LOCAL_ONLY)
+  # Include the install script for the subdirectory.
+  include("/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/esp_security/cmake_install.cmake")
 endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
@@ -399,6 +404,11 @@ endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for the subdirectory.
+  include("/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/esp_driver_touch_sens/cmake_install.cmake")
+endif()
+
+if(NOT CMAKE_INSTALL_LOCAL_ONLY)
+  # Include the install script for the subdirectory.
   include("/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/esp_eth/cmake_install.cmake")
 endif()
 
@@ -509,17 +519,12 @@ endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for the subdirectory.
-  include("/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/perfmon/cmake_install.cmake")
+  include("/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/rt/cmake_install.cmake")
 endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for the subdirectory.
   include("/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/spiffs/cmake_install.cmake")
-endif()
-
-if(NOT CMAKE_INSTALL_LOCAL_ONLY)
-  # Include the install script for the subdirectory.
-  include("/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/touch_element/cmake_install.cmake")
 endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
@@ -535,6 +540,11 @@ endif()
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for the subdirectory.
   include("/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/wifi_provisioning/cmake_install.cmake")
+endif()
+
+if(NOT CMAKE_INSTALL_LOCAL_ONLY)
+  # Include the install script for the subdirectory.
+  include("/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/espressif__esp_websocket_client/cmake_install.cmake")
 endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)

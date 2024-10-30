@@ -5,13 +5,15 @@
 
 #include "esp_chip_info.h"
 #include "esp_log.h"
-#include "esp_flash.h"
+/*#include "esp_flash.h"*/
 #include "nvs_flash.h"
 #include "esp_system.h"
 #include "esp_sleep.h"
 #include "esp_sntp.h"
 #include "esp_timer.h"
 #include "esp_event.h"
+#include "esp_websocket_client.h"
+/*#include "esp_websocket_client.h"*/
 
 /*#include "esp_adc_cal.h"*/
 #include "driver/gpio.h"
@@ -26,6 +28,7 @@
 
 #include "bmx280/bmx280.c"
 #include "analogue_in/analogue_in.cpp"
+#include "ha_websocket/ha_websocket.cpp"
 
 class Main final{
 public:
@@ -51,7 +54,7 @@ class MCUInfo{
 void MCUInfo::printLog(){
 
     ESP_LOGI(log_label, "MCU INFO: ");
-}
+};
 /*
 
     uint8_t wakeUpCause;

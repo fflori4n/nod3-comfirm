@@ -261,6 +261,16 @@ esp_err_t Wlan::loadMACAddress(void)
     return retStatus;
 }
 
+esp_err_t Wlan::is_connected(void){
+    esp_err_t res = ESP_FAIL;
+
+    if(tWlanState::wlanState_connected == _wlanIfaceState ){
+        res = ESP_OK;
+    }
+
+    return res;
+}
+
 #define DEFAULT_SCAN_LIST_SIZE 20
 
 static const char *TAG = "scan";
@@ -345,22 +355,23 @@ void task_manageWlanConnection(void *parameters){
             
             for(uint16_t i=0; i< (30000/5000); i++){
                 vTaskDelay(5000 / portTICK_PERIOD_MS);
-                /*wifiIF.fastScan();*/
+               /*wifiIF.fastScan();*/
             }
 
-            wifi_ap_record_t ap;
+            /*wifi_ap_record_t ap;
             esp_wifi_sta_get_ap_info(&ap);
-            printf("%d\n", ap.rssi);
-            printf("FTM responder %d\n", ap.ftm_responder);
-            printf("FTM initiator %d\n", ap.ftm_initiator);
+            printf("%d\n", ap.rssi);*/
+            // printf("FTM responder %d\n", ap.ftm_responder);
+            // printf("FTM initiator %d\n", ap.ftm_initiator);
 
-           /*wifiIF.disconnect_power_off();
-            vTaskDelay(20000 / portTICK_PERIOD_MS);
-            wifiIF.begin();*/
+            /*wifiIF.disconnect_power_off();
+            vTaskDelay(20000 / portTICK_PERIOD_MS);*/
+            wifiIF.begin();
 
             const char* ssid{"ssid"};
             const char* pass{"pass"};
             wifiIF.sta_connect(ssid, pass);
+            vTaskDelay(5000 / portTICK_PERIOD_MS);
         }  
 }
 

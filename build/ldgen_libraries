@@ -1,4 +1,4 @@
-/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/xtensa/libxtensa.a
+/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/riscv/libriscv.a
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/esp_driver_gpio/libesp_driver_gpio.a
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/esp_pm/libesp_pm.a
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/mbedtls/libmbedtls.a
@@ -17,6 +17,7 @@
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/log/liblog.a
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/heap/libheap.a
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/soc/libsoc.a
+/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/esp_security/libesp_security.a
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/esp_hw_support/libesp_hw_support.a
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/freertos/libfreertos.a
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/newlib/libnewlib.a
@@ -29,12 +30,9 @@
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/app_trace/libapp_trace.a
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/esp_event/libesp_event.a
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/nvs_flash/libnvs_flash.a
-/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/esp_driver_pcnt/libesp_driver_pcnt.a
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/esp_driver_spi/libesp_driver_spi.a
-/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/esp_driver_mcpwm/libesp_driver_mcpwm.a
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/esp_driver_i2s/libesp_driver_i2s.a
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/sdmmc/libsdmmc.a
-/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/esp_driver_sdmmc/libesp_driver_sdmmc.a
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/esp_driver_sdspi/libesp_driver_sdspi.a
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/esp_driver_rmt/libesp_driver_rmt.a
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/esp_driver_tsens/libesp_driver_tsens.a
@@ -76,9 +74,8 @@
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/json/libjson.a
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/mqtt/libmqtt.a
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/nvs_sec_provider/libnvs_sec_provider.a
-/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/perfmon/libperfmon.a
+/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/rt/librt.a
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/spiffs/libspiffs.a
-/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/touch_element/libtouch_element.a
-/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/usb/libusb.a
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/wifi_provisioning/libwifi_provisioning.a
+/home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/espressif__esp_websocket_client/libespressif__esp_websocket_client.a
 /home/ffsk/esp/ESP32_S3_Projects/sm4rtedDUMBED/build/esp-idf/main/libmain.a
