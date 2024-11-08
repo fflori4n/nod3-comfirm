@@ -36,6 +36,8 @@ typedef enum {
     WEBSOCKET_EVENT_DATA,           /*!< When receiving data from the server, possibly multiple portions of the packet */
     WEBSOCKET_EVENT_CLOSED,         /*!< The connection has been closed cleanly */
     WEBSOCKET_EVENT_BEFORE_CONNECT, /*!< The event occurs before connecting */
+    WEBSOCKET_EVENT_BEGIN,          /*!< The event occurs once after thread creation, before event loop */
+    WEBSOCKET_EVENT_FINISH,         /*!< The event occurs once after event loop, before thread destruction */
     WEBSOCKET_EVENT_MAX
 } esp_websocket_event_id_t;
 
@@ -118,6 +120,7 @@ typedef struct {
     bool                        disable_pingpong_discon;    /*!< Disable auto-disconnect due to no PONG received within pingpong_timeout_sec */
     bool                        use_global_ca_store;        /*!< Use a global ca_store for all the connections in which this bool is set. */
     esp_err_t (*crt_bundle_attach)(void *conf);             /*!< Function pointer to esp_crt_bundle_attach. Enables the use of certification bundle for server verification, MBEDTLS_CERTIFICATE_BUNDLE must be enabled in menuconfig. Include esp_crt_bundle.h, and use `esp_crt_bundle_attach` here to include bundled CA certificates. */
+    const char                  *cert_common_name;          /*!< Expected common name of the server certificate */
     bool                        skip_cert_common_name_check;/*!< Skip any validation of server certificate CN field */
     bool                        keep_alive_enable;          /*!< Enable keep-alive timeout */
     int                         keep_alive_idle;            /*!< Keep-alive idle time. Default is 5 (second) */
@@ -127,6 +130,7 @@ typedef struct {
     int                         network_timeout_ms;         /*!< Abort network operation if it is not completed after this value, in milliseconds (defaults to 10s) */
     size_t                      ping_interval_sec;          /*!< Websocket ping interval, defaults to 10 seconds if not set */
     struct ifreq                *if_name;                   /*!< The name of interface for data to go through. Use the default interface without setting */
+    esp_transport_handle_t      ext_transport;              /*!< External WebSocket tcp_transport handle to the client; or if null, the client will create its own transport handle. */
 } esp_websocket_client_config_t;
 
 /**
@@ -415,6 +419,29 @@ size_t esp_websocket_client_get_ping_interval_sec(esp_websocket_client_handle_t 
  * @return     esp_err_t
  */
 esp_err_t esp_websocket_client_set_ping_interval_sec(esp_websocket_client_handle_t client, size_t ping_interval_sec);
+
+/**
+ * @brief      Get the next reconnect timeout for client. Returns -1 when client is not initialized or automatic reconnect is disabled.
+ *
+ * @param[in]  client             The client
+ *
+ * @return     Reconnect timeout in msec
+ */
+int esp_websocket_client_get_reconnect_timeout(esp_websocket_client_handle_t client);
+
+/**
+ * @brief      Set next reconnect timeout for client.
+ *
+ *  Notes:
+ *  - Changing this value when reconnection delay is already active does not immediately affect the active delay and may have unexpected result.
+ *  - Good place to change this value is when handling WEBSOCKET_EVENT_DISCONNECTED or WEBSOCKET_EVENT_ERROR events.
+ *
+ * @param[in]  client             The client
+ * @param[in]  reconnect_timeout_ms  The new timeout
+ *
+ * @return     esp_err_t
+ */
+esp_err_t esp_websocket_client_set_reconnect_timeout(esp_websocket_client_handle_t client, int reconnect_timeout_ms);
 
 /**
  * @brief Register the Websocket Events

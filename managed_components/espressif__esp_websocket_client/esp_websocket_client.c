@@ -95,7 +95,9 @@ typedef struct {
     size_t                      client_key_len;
     bool                        use_global_ca_store;
     bool                        skip_cert_common_name_check;
+    const char                  *cert_common_name;
     esp_err_t                   (*crt_bundle_attach)(void *conf);
+    esp_transport_handle_t      ext_transport;
 } websocket_config_storage_t;
 
 typedef enum {
@@ -204,6 +206,8 @@ static esp_err_t esp_websocket_client_dispatch_event(esp_websocket_client_handle
         event_data.error_handle.esp_tls_last_esp_err = esp_tls_get_and_clear_last_error(esp_transport_get_error_handle(client->transport),
                 &client->error_handle.esp_tls_stack_err,
                 &client->error_handle.esp_tls_cert_verify_flags);
+        event_data.error_handle.esp_tls_stack_err = client->error_handle.esp_tls_stack_err;
+        event_data.error_handle.esp_tls_cert_verify_flags = client->error_handle.esp_tls_cert_verify_flags;
         event_data.error_handle.esp_transport_sock_errno = esp_transport_get_errno(client->transport);
     }
     event_data.error_handle.error_type = client->error_handle.error_type;
@@ -225,13 +229,15 @@ static esp_err_t esp_websocket_client_abort_connection(esp_websocket_client_hand
     ESP_WS_CLIENT_STATE_CHECK(TAG, client, return ESP_FAIL);
     esp_transport_close(client->transport);
 
-    if (client->config->auto_reconnect) {
+    if (!client->config->auto_reconnect) {
+        client->run = false;
+        client->state = WEBSOCKET_STATE_UNKNOW;
+    } else {
         client->reconnect_tick_ms = _tick_get_ms();
         ESP_LOGI(TAG, "Reconnect after %d ms", client->wait_timeout_ms);
+        client->error_handle.error_type = error_type;
+        client->state = WEBSOCKET_STATE_WAIT_TIMEOUT;
     }
-
-    client->error_handle.error_type = error_type;
-    client->state = WEBSOCKET_STATE_WAIT_TIMEOUT;
     esp_websocket_client_dispatch_event(client, WEBSOCKET_EVENT_DISCONNECTED, NULL, 0);
     return ESP_OK;
 }
@@ -430,7 +436,7 @@ static void destroy_and_free_resources(esp_websocket_client_handle_t client)
     if (client->transport_list) {
         esp_transport_list_destroy(client->transport_list);
     }
-    vQueueDelete(client->lock);
+    vSemaphoreDelete(client->lock);
     free(client->tx_buffer);
     free(client->rx_buffer);
     free(client->errormsg_buffer);
@@ -497,6 +503,13 @@ static esp_err_t esp_websocket_client_create_transport(esp_websocket_client_hand
 
         esp_transport_set_default_port(ssl, WEBSOCKET_SSL_DEFAULT_PORT);
         esp_transport_list_add(client->transport_list, ssl, "_ssl"); // need to save to transport list, for cleanup
+        if (client->keep_alive_cfg.keep_alive_enable) {
+            esp_transport_ssl_set_keep_alive(ssl, &client->keep_alive_cfg);
+        }
+        if (client->if_name) {
+            esp_transport_ssl_set_interface_name(ssl, client->if_name);
+        }
+
         if (client->config->use_global_ca_store == true) {
             esp_transport_ssl_enable_global_ca_store(ssl);
         } else if (client->config->cert) {
@@ -530,6 +543,13 @@ static esp_err_t esp_websocket_client_create_transport(esp_websocket_client_hand
         if (client->config->skip_cert_common_name_check) {
             esp_transport_ssl_skip_common_name_check(ssl);
         }
+        if (client->config->cert_common_name) {
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 1, 0)
+            esp_transport_ssl_set_common_name(ssl, client->config->cert_common_name);
+#else
+            ESP_LOGE(TAG, "cert_common_name requires ESP-IDF 5.1.0 or later");
+#endif
+        }
 
         esp_transport_handle_t wss = esp_transport_ws_init(ssl);
         ESP_WS_CLIENT_MEM_CHECK(TAG, wss, return ESP_ERR_NO_MEM);
@@ -552,9 +572,29 @@ static int esp_websocket_client_send_with_exact_opcode(esp_websocket_client_hand
     int wlen = 0, widx = 0;
     bool contained_fin = opcode & WS_TRANSPORT_OPCODES_FIN;
 
+    if (client == NULL || len < 0 || (data == NULL && len > 0)) {
+        ESP_LOGE(TAG, "Invalid arguments");
+        return -1;
+    }
+
+    if (!esp_websocket_client_is_connected(client)) {
+        ESP_LOGE(TAG, "Websocket client is not connected");
+        return -1;
+    }
+
+    if (client->transport == NULL) {
+        ESP_LOGE(TAG, "Invalid transport");
+        return -1;
+    }
+
+    if (xSemaphoreTakeRecursive(client->lock, timeout) != pdPASS) {
+        ESP_LOGE(TAG, "Could not lock ws-client within %" PRIu32 " timeout", timeout);
+        return -1;
+    }
+
     if (esp_websocket_new_buf(client, true) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to setup tx buffer");
-        return -1;
+        goto unlock_and_return;
     }
 
     while (widx < len || opcode) {  // allow for sending "current_opcode" only message with len==0
@@ -580,14 +620,18 @@ static int esp_websocket_client_send_with_exact_opcode(esp_websocket_client_hand
                 esp_websocket_client_error(client, "esp_transport_write() returned %d, errno=%d", ret, errno);
             }
             esp_websocket_client_abort_connection(client, WEBSOCKET_ERROR_TYPE_TCP_TRANSPORT);
-            return ret;
+            goto unlock_and_return;
         }
         opcode = 0;
         widx += wlen;
         need_write = len - widx;
     }
     esp_websocket_free_buf(client, true);
-    return widx;
+    ret = widx;
+
+unlock_and_return:
+    xSemaphoreGiveRecursive(client->lock);
+    return ret;
 }
 
 esp_websocket_client_handle_t esp_websocket_client_init(const esp_websocket_client_config_t *config)
@@ -641,6 +685,11 @@ esp_websocket_client_handle_t esp_websocket_client_init(const esp_websocket_clie
     }
 
     // configure ssl related parameters
+    if (config->cert_common_name != NULL && config->skip_cert_common_name_check) {
+        ESP_LOGE(TAG, "Both cert_common_name and skip_cert_common_name_check are set, only one of them can be set");
+        goto _websocket_init_fail;
+    }
+
     client->config->use_global_ca_store = config->use_global_ca_store;
     client->config->cert = config->cert_pem;
     client->config->cert_len = config->cert_len;
@@ -649,7 +698,9 @@ esp_websocket_client_handle_t esp_websocket_client_init(const esp_websocket_clie
     client->config->client_key = config->client_key;
     client->config->client_key_len = config->client_key_len;
     client->config->skip_cert_common_name_check = config->skip_cert_common_name_check;
+    client->config->cert_common_name = config->cert_common_name;
     client->config->crt_bundle_attach = config->crt_bundle_attach;
+    client->config->ext_transport = config->ext_transport;
 
     if (config->uri) {
         if (esp_websocket_client_set_uri(client, config->uri) != ESP_OK) {
@@ -908,7 +959,9 @@ static void esp_websocket_client_task(void *pv)
     client->run = true;
 
     //get transport by scheme
-    client->transport = esp_transport_list_get_transport(client->transport_list, client->config->scheme);
+    if (client->transport == NULL && client->config->ext_transport == NULL) {
+        client->transport = esp_transport_list_get_transport(client->transport_list, client->config->scheme);
+    }
 
     if (client->transport == NULL) {
         ESP_LOGE(TAG, "There are no transports valid, stop websocket client");
@@ -921,6 +974,7 @@ static void esp_websocket_client_task(void *pv)
 
     client->state = WEBSOCKET_STATE_INIT;
     xEventGroupClearBits(client->status_bits, STOPPED_BIT | CLOSE_FRAME_SENT_BIT);
+    esp_websocket_client_dispatch_event(client, WEBSOCKET_EVENT_BEGIN, NULL, 0);
     int read_select = 0;
     while (client->run) {
         if (xSemaphoreTakeRecursive(client->lock, lock_timeout) != pdPASS) {
@@ -999,10 +1053,6 @@ static void esp_websocket_client_task(void *pv)
             break;
         case WEBSOCKET_STATE_WAIT_TIMEOUT:
 
-            if (!client->config->auto_reconnect) {
-                client->run = false;
-                break;
-            }
             if (_tick_get_ms() - client->reconnect_tick_ms > client->wait_timeout_ms) {
                 client->state = WEBSOCKET_STATE_INIT;
                 client->reconnect_tick_ms = _tick_get_ms();
@@ -1033,7 +1083,9 @@ static void esp_websocket_client_task(void *pv)
                 } else {
                     esp_websocket_client_error(client, "esp_transport_poll_read() returned %d, errno=%d", read_select, errno);
                 }
+                xSemaphoreTakeRecursive(client->lock, lock_timeout);
                 esp_websocket_client_abort_connection(client, WEBSOCKET_ERROR_TYPE_TCP_TRANSPORT);
+                xSemaphoreGiveRecursive(client->lock);
             }
         } else if (WEBSOCKET_STATE_WAIT_TIMEOUT == client->state) {
             // waiting for reconnecting...
@@ -1055,6 +1107,7 @@ static void esp_websocket_client_task(void *pv)
         }
     }
 
+    esp_websocket_client_dispatch_event(client, WEBSOCKET_EVENT_FINISH, NULL, 0);
     esp_transport_close(client->transport);
     xEventGroupSetBits(client->status_bits, STOPPED_BIT);
     client->state = WEBSOCKET_STATE_UNKNOW;
@@ -1073,9 +1126,13 @@ esp_err_t esp_websocket_client_start(esp_websocket_client_handle_t client)
         ESP_LOGE(TAG, "The client has started");
         return ESP_FAIL;
     }
-    if (esp_websocket_client_create_transport(client) != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to create websocket transport");
-        return ESP_FAIL;
+
+    client->transport = client->config->ext_transport;
+    if (!client->transport) {
+        if (esp_websocket_client_create_transport(client) != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to create websocket transport");
+            return ESP_FAIL;
+        }
     }
 
     if (xTaskCreate(esp_websocket_client_task, client->config->task_name ? client->config->task_name : "websocket_task",
@@ -1084,6 +1141,7 @@ esp_err_t esp_websocket_client_start(esp_websocket_client_handle_t client)
         return ESP_FAIL;
     }
     xEventGroupClearBits(client->status_bits, STOPPED_BIT | CLOSE_FRAME_SENT_BIT);
+    ESP_LOGI(TAG, "Started");
     return ESP_OK;
 }
 
@@ -1208,35 +1266,7 @@ int esp_websocket_client_send_fin(esp_websocket_client_handle_t client, TickType
 
 int esp_websocket_client_send_with_opcode(esp_websocket_client_handle_t client, ws_transport_opcodes_t opcode, const uint8_t *data, int len, TickType_t timeout)
 {
-    int ret = -1;
-    if (client == NULL || len < 0 || (data == NULL && len > 0)) {
-        ESP_LOGE(TAG, "Invalid arguments");
-        return -1;
-    }
-
-    if (xSemaphoreTakeRecursive(client->lock, timeout) != pdPASS) {
-        ESP_LOGE(TAG, "Could not lock ws-client within %" PRIu32 " timeout", timeout);
-        return -1;
-    }
-
-    if (!esp_websocket_client_is_connected(client)) {
-        ESP_LOGE(TAG, "Websocket client is not connected");
-        goto unlock_and_return;
-    }
-
-    if (client->transport == NULL) {
-        ESP_LOGE(TAG, "Invalid transport");
-        goto unlock_and_return;
-    }
-
-    ret = esp_websocket_client_send_with_exact_opcode(client, opcode | WS_TRANSPORT_OPCODES_FIN, data, len, timeout);
-    if (ret < 0) {
-        ESP_LOGE(TAG, "Failed to send the buffer");
-        goto unlock_and_return;
-    }
-unlock_and_return:
-    xSemaphoreGiveRecursive(client->lock);
-    return ret;
+    return esp_websocket_client_send_with_exact_opcode(client, opcode | WS_TRANSPORT_OPCODES_FIN, data, len, timeout);
 }
 
 bool esp_websocket_client_is_connected(esp_websocket_client_handle_t client)
@@ -1279,6 +1309,43 @@ esp_err_t esp_websocket_client_set_ping_interval_sec(esp_websocket_client_handle
     return ESP_OK;
 }
 
+int esp_websocket_client_get_reconnect_timeout(esp_websocket_client_handle_t client)
+{
+    if (client == NULL) {
+        ESP_LOGW(TAG, "Client was not initialized");
+        return -1;
+    }
+
+    if (!client->config->auto_reconnect) {
+        ESP_LOGW(TAG, "Automatic reconnect is disabled");
+        return -1;
+    }
+
+    return client->wait_timeout_ms;
+}
+
+esp_err_t esp_websocket_client_set_reconnect_timeout(esp_websocket_client_handle_t client, int reconnect_timeout_ms)
+{
+    if (client == NULL) {
+        ESP_LOGW(TAG, "Client was not initialized");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (reconnect_timeout_ms <= 0) {
+        ESP_LOGW(TAG, "Invalid reconnect timeout");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!client->config->auto_reconnect) {
+        ESP_LOGW(TAG, "Automatic reconnect is disabled");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    client->wait_timeout_ms = reconnect_timeout_ms;
+
+    return ESP_OK;
+}
+
 esp_err_t esp_websocket_register_events(esp_websocket_client_handle_t client,
                                         esp_websocket_event_id_t event,
                                         esp_event_handler_t event_handler,
@@ -1288,5 +1355,4 @@ esp_err_t esp_websocket_register_events(esp_websocket_client_handle_t client,
         return ESP_ERR_INVALID_ARG;
     }
     return esp_event_handler_register_with(client->event_handle, WEBSOCKET_EVENTS, event, event_handler, event_handler_arg);
-    
 }

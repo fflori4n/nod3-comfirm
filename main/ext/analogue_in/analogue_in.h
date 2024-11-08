@@ -91,7 +91,7 @@ class ADC_input{
     
 
     template<typename templated_t>
-    templated_t weighted_exp_filter(uint32_t raw_value, templated_t filtered_value, const float average_param, templated_t init_value) {
+    inline templated_t weighted_exp_filter(uint32_t raw_value, templated_t filtered_value, const float average_param, templated_t init_value) {
         /*static_assert(std::is_floating_point<templated_t>::value, "T must be a floating point type.");*/ /* if I frick this up, it's on me*/
         return (init_value == filtered_value) ? raw_value : (((1.0 - average_param) * filtered_value) + (average_param * raw_value));
     }
