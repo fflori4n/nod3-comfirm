@@ -9,7 +9,7 @@
 #include "sdkconfig.h"
 #include "lib/main.h"
 
-MCUInfo mcuInfo;
+/*MCUInfo mcuInfo;*/
 Ntp_time ntpTime;
 
 /* Config for I2C bus */
@@ -28,7 +28,7 @@ constexpr i2c_config_t i2c_cfg{
 bmx280_sensor ambient_bme280;
 ADC_input current_transformer_pin(ADC_UNIT_1,ADC_CHANNEL_4);
 Homeassistant_websocket ha_websoc;
-char* current_template = "{\"id\":%%d,\"type\":\"call_service\",\"domain\":\"websoc_sensor\",\"service\":\"acct_test_sens.set_values\",\"service_data\":%s}";
+char* sensor_websoc_template = "{\"id\":%%d,\"type\":\"call_service\",\"domain\":\"websoc_sensor\",\"service\":\"acct_test_sens.set_values\",\"service_data\":%s}";
 char msg[2048];
 char mqtt_service_data_buffer[2048] = {};
 AC_current_measurement c0_current_sensor;
@@ -36,7 +36,7 @@ AC_current_measurement c0_current_sensor;
 extern "C" void app_main(void)
 {
     ESP_LOGI("MAIN","APPLICATION CODE STARTED.");
-   /* ESP_ERROR_CHECK(esp_netif_init());*/
+    ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     /* init NVS flash - used by wi-fi bluetooth or BLE */
     esp_err_t ret = nvs_flash_init();
@@ -46,10 +46,12 @@ extern "C" void app_main(void)
     }
     ESP_ERROR_CHECK( ret );
 
+    ESP_LOGI("MAIN","INIT STARTED");
     Main::init();
-
+    ESP_LOGI("MAIN","INIT COMPLETED");
     for(;;){
         Main::loop();
+       /* ESP_LOGI("MAIN","LOOP COMPLETED, PET RTOS WDT");*/
     } 
 }
 
@@ -58,25 +60,6 @@ esp_err_t Main::init(void){
     printf("DBG_UART OK");
     printf("INIT");
 
-    mcuInfo.lastResetCause = esp_reset_reason();
-    mcuInfo.lastWakeUpCause = esp_sleep_get_wakeup_cause();
-    mcuInfo.printLog();
-
-    /* Print chip information */
-    esp_chip_info_t chip_info;
-    /*uint32_t flash_size;*/
-    esp_chip_info(&chip_info);
-    printf("This is %s chip with %d CPU core(s), %s%s%s%s, ",
-           CONFIG_IDF_TARGET,
-           chip_info.cores,
-           (chip_info.features & CHIP_FEATURE_WIFI_BGN) ? "WiFi/" : "",
-           (chip_info.features & CHIP_FEATURE_BT) ? "BT" : "",
-           (chip_info.features & CHIP_FEATURE_BLE) ? "BLE" : "",
-           (chip_info.features & CHIP_FEATURE_IEEE802154) ? ", 802.15.4 (Zigbee/Thread)" : "");
-
-    unsigned major_rev = chip_info.revision / 100;
-    unsigned minor_rev = chip_info.revision % 100;
-    printf("silicon revision v%d.%d, ", major_rev, minor_rev);
     /*if(esp_flash_get_size(NULL, &flash_size) != ESP_OK) {
         printf("Get flash size failed");
         return (esp_err_t)ESP_OK;
@@ -84,8 +67,6 @@ esp_err_t Main::init(void){
 
     printf("%" PRIu32 "MB %s flash\n", flash_size / (uint32_t)(1024 * 1024),
            (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embedded" : "external");*/
-
-    printf("Minimum free heap size: %" PRIu32 " bytes\n", esp_get_minimum_free_heap_size());
 
     xTaskCreatePinnedToCore(
     NETWORK::task_manageWlanConnection,
@@ -121,6 +102,11 @@ esp_err_t Main::init(void){
     // ESP_ERROR_CHECK(bmx280_configure(bmx280, &bmx_cfg));
 
     current_transformer_pin.configure(ADC_WIDTH_BIT_12, 1u);
+
+   /*mcuInfo.load_session_nonchanging();*/
+    /*mcuInfo.update_mcu_telemetry();*/
+    /*mcuInfo.print_detailed();*/
+    vTaskDelay(1000/portTICK_PERIOD_MS);
 
     return (esp_err_t)ESP_OK;
 
@@ -175,14 +161,28 @@ void Main::loop(void){
     
     current_transformer_pin.readAC_RMS(c0_current_sensor, ntpTime, 1000);
 
-    c0_current_sensor.get_service_data(mqtt_service_data_buffer, 2048);
+    
+
+    // c0_current_sensor.get_service_data(mqtt_service_data_buffer, 2048);
+    // ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
+    // snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
+    // ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
+
+    wlan_interface.get_service_data(mqtt_service_data_buffer, 2048);
     ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
 
     ha_websoc.connectAndAuthSocket(5, 1500);
-    /*ha_websoc.ping(5, 2000);*/
-    snprintf(msg, 2048, current_template, mqtt_service_data_buffer);
+    snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
     ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
+
+    c0_current_sensor.get_service_data(mqtt_service_data_buffer, 2048);
+    ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
+    snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
+    ha_websoc.send_text(msg, "\"success\"", nullptr, 2000); /* TODO: why this not work??*/
+
     ha_websoc.disconnect();
+
+    wlan_interface.fastScan();
     /*ESP_LOGI("", "mutex: %d", txrx_buffer_mutex.try_lock());*/
     /*vTaskDelay(10000/ portTICK_PERIOD_MS);*/
     /*current_transformer_pin.readAC_RMS_dma(1000);*/
@@ -204,7 +204,7 @@ void Main::loop(void){
     // ESP_LOGI("ADC_READ", "%ld", adc_reading);
 
     // ambient_bme280.read();
-    vTaskDelay(90000/ portTICK_PERIOD_MS);
+    vTaskDelay(180000/ portTICK_PERIOD_MS);
     fflush(stdout);
     return;
 }
