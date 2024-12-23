@@ -35,7 +35,8 @@ class Homeassistant_websocket
 private:
   static constexpr const char *ha_websoc_log_tag{"HAWEBSOC"};
 
-  static constexpr const char *ha_websoc_endpoint{"ws://192.168.1.199:8123/api/websocket"};
+  /*static constexpr const char *ha_websoc_endpoint{"ws://192.168.1.199:8123/api/websocket"};*/
+  static constexpr const char *ha_websoc_endpoint{"ws://fflori4n.duckdns.org:8123/api/websocket"};
   static constexpr const char *ha_websoc_token{"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJhNjY4OTk1ZGQ5Mzg0YWRiOGEwZTk1OGUxZmM0YWJlZiIsImlhdCI6MTcwNTI0MjcyOSwiZXhwIjoyMDIwNjAyNzI5fQ.VKxml-fWpsuBZExIHViE2WEg1ZqxDcbNFFKWJIyflhc"};
 
   static constexpr const char *ha_websoc_auth_template{"{\"type\":\"auth\",\"access_token\":\"%s\"}"};

@@ -1,5 +1,7 @@
 #include <esp_system.h>
 
+RTC_FAST_ATTR uint64_t nv_mcu_uptime_sec;
+
 class MCUInfo{
 
     static constexpr double currentConsumptionAwake{0.0};
@@ -9,22 +11,22 @@ class MCUInfo{
     const char* reset_reason_to_string(esp_reset_reason_t key)
     {
         constexpr std::array<std::pair<esp_reset_reason_t, const char *>, 16> reset_reason_str_map = {{
-            {ESP_RST_UNKNOWN, "RST_UNKNOWN"},
-            {ESP_RST_POWERON, "RST_POWER_ON"},
-            {ESP_RST_EXT, "RST_EXTPIN"},
-            {ESP_RST_SW, "RST_ESP_RESTART"},
-            {ESP_RST_PANIC, "RST_PANIC"},
-            {ESP_RST_INT_WDT, "RST_ISR_WDT"},
-            {ESP_RST_TASK_WDT, "RST_TASK_WDT"},
-            {ESP_RST_WDT, "RST_WDT"},
-            {ESP_RST_DEEPSLEEP, "RST_DEEP_SLEEP_EXITED"},
-            {ESP_RST_BROWNOUT, "RST_BROWN_OUT"},
-            {ESP_RST_SDIO, "RST_SDIO"},
-            {ESP_RST_USB, "RST_USB"},
-            {ESP_RST_JTAG, "RST_JTAG"},
-            {ESP_RST_EFUSE, "RST_EFUSE"},
-            {ESP_RST_PWR_GLITCH, "RST_PWR_GLITCH"},
-            {ESP_RST_CPU_LOCKUP, "RST_CPU_LOCKUP"}
+            {ESP_RST_UNKNOWN, "UNKNOWN"},
+            {ESP_RST_POWERON, "POWER_ON"},
+            {ESP_RST_EXT, "EXTPIN"},
+            {ESP_RST_SW, "ESP_RESTART"},
+            {ESP_RST_PANIC, "PANIC"},
+            {ESP_RST_INT_WDT, "ISR_WDT"},
+            {ESP_RST_TASK_WDT, "TASK_WDT"},
+            {ESP_RST_WDT, "WDT"},
+            {ESP_RST_DEEPSLEEP, "DEEP_SLEEP_EXITED"},
+            {ESP_RST_BROWNOUT, "BROWN_OUT"},
+            {ESP_RST_SDIO, "SDIO"},
+            {ESP_RST_USB, "USB"},
+            {ESP_RST_JTAG, "JTAG"},
+            {ESP_RST_EFUSE, "EFUSE"},
+            {ESP_RST_PWR_GLITCH, "PWR_GLITCH"},
+            {ESP_RST_CPU_LOCKUP, "CPU_LOCKUP"}
         }};
 
         for (auto &pair : reset_reason_str_map)
@@ -41,19 +43,19 @@ class MCUInfo{
     const char* wake_reason_to_string(esp_sleep_wakeup_cause_t key)
     {
         constexpr std::array<std::pair<esp_sleep_wakeup_cause_t, const char *>, 13> wake_reason_str_map = {{
-            {ESP_SLEEP_WAKEUP_UNDEFINED,"WAKE_UNDEFINED"},
-            {ESP_SLEEP_WAKEUP_ALL,"WAKE_UNDEFINED"},
-            {ESP_SLEEP_WAKEUP_EXT0,"WAKE_EXT0"},
-            {ESP_SLEEP_WAKEUP_EXT1,"WAKE_EXT1"},
-            {ESP_SLEEP_WAKEUP_TIMER,"WAKE_TIMER"},
-            {ESP_SLEEP_WAKEUP_TOUCHPAD,"WAKE_TOUCH"},
-            {ESP_SLEEP_WAKEUP_ULP,"WAKE_ULP"},
-            {ESP_SLEEP_WAKEUP_GPIO,"WAKE_GPIO"},
-            {ESP_SLEEP_WAKEUP_UART,"WAKE_UART"},
-            {ESP_SLEEP_WAKEUP_WIFI,"WAKE_WIFI"},
-            {ESP_SLEEP_WAKEUP_COCPU,"WAKE_COPCU"},
-            {ESP_SLEEP_WAKEUP_COCPU_TRAP_TRIG,"WAKE_COPCU_CRASH"},
-            {ESP_SLEEP_WAKEUP_BT,"WAKE_BT"}
+            {ESP_SLEEP_WAKEUP_UNDEFINED,"UNDEFINED"},
+            {ESP_SLEEP_WAKEUP_ALL,"UNDEFINED"},
+            {ESP_SLEEP_WAKEUP_EXT0,"EXT0"},
+            {ESP_SLEEP_WAKEUP_EXT1,"EXT1"},
+            {ESP_SLEEP_WAKEUP_TIMER,"TIMER"},
+            {ESP_SLEEP_WAKEUP_TOUCHPAD,"TOUCH"},
+            {ESP_SLEEP_WAKEUP_ULP,"ULP"},
+            {ESP_SLEEP_WAKEUP_GPIO,"GPIO"},
+            {ESP_SLEEP_WAKEUP_UART,"UART"},
+            {ESP_SLEEP_WAKEUP_WIFI,"WIFI"},
+            {ESP_SLEEP_WAKEUP_COCPU,"COPCU"},
+            {ESP_SLEEP_WAKEUP_COCPU_TRAP_TRIG,"COPCU_CRASH"},
+            {ESP_SLEEP_WAKEUP_BT,"BT"}
         }};
 
         for (auto &pair : wake_reason_str_map)
@@ -77,7 +79,7 @@ class MCUInfo{
     esp_reset_reason_t lastResetCause;
     esp_sleep_wakeup_cause_t lastWakeUpCause;
 
-    uint64_t up_time_sec = 0;
+    uint64_t up_time_sec = nv_mcu_uptime_sec;
 
     private:
 
@@ -156,9 +158,32 @@ class MCUInfo{
 
     }
 
-    void print_telemetry(){
-
+    inline int16_t get_fraction(float value)
+    {
+        return (abs(((int16_t)(value * 100)) % 100));
     }
+
+    esp_err_t get_service_data(char *text_buffer, int16_t text_buffer_size)
+    {
+
+        static constexpr char *mcu_info_sensor_template = "\"mcu_upt\":%.2f, \"mcu_temp\":%.2f, \"mcu_rst\":\"%s\"";
+
+        float uptime_hours = (nv_mcu_uptime_sec/3600.0);
+        int16_t res = snprintf(text_buffer, text_buffer_size, mcu_info_sensor_template,
+                               (float)(uptime_hours),
+                               (float)(chip_internal_temp_degc),
+                               reset_reason_to_string(esp_reset_reason())
+                              /* wake_reason_to_string(esp_sleep_get_wakeup_cause())*/
+                               );
+
+        if ((res < 0) || (res >= text_buffer_size))
+        {
+            return ESP_FAIL;
+        }
+        return ESP_OK;
+    }
+
+   
     
 
 };

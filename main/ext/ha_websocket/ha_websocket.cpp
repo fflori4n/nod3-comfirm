@@ -22,10 +22,10 @@ void Homeassistant_websocket::event_handler(void *handler_args, esp_event_base_t
 
   case WEBSOCKET_EVENT_DATA:
     {
-    ESP_LOGI(ha_websoc_log_tag, "EVENT_DATA");
-    ESP_LOGI(ha_websoc_log_tag, "recieved bytes: %d, code: %s", data->data_len, op_code_dbg(data->op_code));
-
+   /*ESP_LOGI(ha_websoc_log_tag, "EVENT_DATA");*/
+    
     websoc_rx_data.op_code = data->op_code;
+    websoc_rx_data.data_len = data->data_len;
     memset(websoc_rx_data.rx_buffer, '\0', txrx_buffer_size);
     snprintf(websoc_rx_data.rx_buffer, txrx_buffer_size, (char *)data->data_ptr);
     websoc_rx_data.processed = false;
@@ -45,9 +45,6 @@ esp_err_t Homeassistant_websocket::waitForResponse(const char *positiveRespKey, 
 
     if (false == websoc_rx_data.processed)
     {
-
-      ESP_LOGI(ha_websoc_log_tag, "recieved: %s", websoc_rx_data.rx_buffer);
-
       if ((positiveRespKey != NULL) && (strstr(websoc_rx_data.rx_buffer, positiveRespKey) != NULL))
       {
         result = ESP_OK;
@@ -64,7 +61,7 @@ esp_err_t Homeassistant_websocket::waitForResponse(const char *positiveRespKey, 
     }
   }
 
-  ESP_LOGI(ha_websoc_log_tag, "%s after %d ms", dbgResultLabels[(result & 0x03)], (responseTime * poll_rx_buffer_ms));
+  ESP_LOGI(ha_websoc_log_tag, "RX:[%-12s |%4d bytes] %-17s, elapsed: %dms\nl-->:\x1b[0m%s\x1b[32m:<", op_code_dbg(websoc_rx_data.op_code), websoc_rx_data.data_len,dbgResultLabels[(result & 0x03)], (responseTime * poll_rx_buffer_ms), websoc_rx_data.rx_buffer);
 
   return result;
 }
@@ -164,6 +161,11 @@ esp_err_t Homeassistant_websocket::disconnect(void){
 
     esp_err_t res = ESP_OK;
 
+    if(ESP_OK != wlan_interface.is_connected())
+    {
+      return ESP_ERR_WIFI_BASE;
+    }
+
     if (websoc_status_t::websoc_sts_not_initialized == socket_status)
     {
       res = init();
@@ -192,7 +194,7 @@ esp_err_t Homeassistant_websocket::disconnect(void){
 
         memset(rxtx_buffer, '\0', txrx_buffer_size);
         uint16_t len = snprintf(rxtx_buffer, txrx_buffer_size, ha_websoc_auth_template, ha_websoc_token); /* move websoc out template with token into buff*/
-        ESP_LOGI(ha_websoc_log_tag, "sending: %s", rxtx_buffer);
+        /*ESP_LOGI(ha_websoc_log_tag, "sending: %s", rxtx_buffer);*/
 
         int8_t result = esp_websocket_client_send_text(websoc_client_handle, rxtx_buffer, len, portMAX_DELAY);
         if (-1 == result)
@@ -204,11 +206,16 @@ esp_err_t Homeassistant_websocket::disconnect(void){
             socket_status = websoc_status_t::websoc_sts_not_connected;
           }
         }
+        else{
+          ESP_LOGI(ha_websoc_log_tag, "TX:[%-12s |%4d/%4d bytes]\nl-<-:\x1b[0m%s\x1b[32m:-", op_code_dbg(1), result, strlen(rxtx_buffer), rxtx_buffer);
+        }
+
+
 
         if (ESP_OK == waitForResponse("auth_ok", NULL, 2000))
         {
           socket_status = websoc_status_t::websoc_sts_connected_authed;
-          request_id = 0;
+          request_id = 1;
         }
       }
 
@@ -238,18 +245,35 @@ esp_err_t Homeassistant_websocket::disconnect(void){
 
     if(websoc_status_t::websoc_sts_connected_authed == socket_status){
 
+      /* construct the frame */
+      memset(rxtx_buffer, '\0', txrx_buffer_size);
+      /* TODO: check if str has %d and only one %d to add request id + check if text is longer than what buffer can accept*/
+      uint16_t len = snprintf(rxtx_buffer, txrx_buffer_size, tx_text, request_id);
+      /*ESP_LOGI(ha_websoc_log_tag, "READY TO SEND: %d bytes: %s",strlen(rxtx_buffer), rxtx_buffer);*/
+      request_id++;
+
       for (uint16_t i = 0; ((res != ESP_OK) && (i < reattempt_send)); i++)
       {
 
-        memset(rxtx_buffer, '\0', txrx_buffer_size);
+          [&]() { /* wait_clear_to_send(void) */
 
-        /* TODO: check if str has %d and only one %d to add request id + check if text is longer than what buffer can accept*/
-        uint16_t len = snprintf(rxtx_buffer, txrx_buffer_size, tx_text, request_id);
-        request_id++;
+            constexpr uint16_t wait_timeout_ms{1000};
+            constexpr uint16_t network_CTS_poll_ms{50};
 
-        ESP_LOGI(ha_websoc_log_tag, "send_text: %s", rxtx_buffer);
+            for (uint16_t i = 0; ((false == wlan_interface.network_ready()) && (i < (wait_timeout_ms / network_CTS_poll_ms))); i++)
+            {
+              vTaskDelay(network_CTS_poll_ms / portTICK_PERIOD_MS);
+            }
 
-          int8_t result = esp_websocket_client_send_text(websoc_client_handle, rxtx_buffer, len, portMAX_DELAY);
+          }();
+
+          if(true != wlan_interface.network_ready()){
+              ESP_LOGW(ha_websoc_log_tag, "Network no clear to send!");
+              continue;
+          }
+
+          int16_t result = esp_websocket_client_send_text(websoc_client_handle, rxtx_buffer, len, (50 / portTICK_PERIOD_MS));
+          ESP_LOGI(ha_websoc_log_tag, "TX:[%-12s |%4d/%4d bytes]\nl-<-:\x1b[0m%s\x1b[32m:-", op_code_dbg(1), result, strlen(rxtx_buffer), rxtx_buffer);
 
           if(result >= 0){
             res = waitForResponse(positive_response_key, negative_response_key, response_timeout_ms);

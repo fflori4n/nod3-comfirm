@@ -268,7 +268,8 @@ class ADC_input{
         current_sensor.signal_snr = (float)((max-min)/50);
         current_sensor.volt_amps = power;
 
-        time_t current_time = esp_rtc_time.get_valid_esp_rtc_time();
+        time_t current_time = esp_rtc_time.get_esp_rtc_time();
+        
         time_t duration = 0;
 
         if((0 != current_time) && (0 != current_sensor.last_measurement_time)){
@@ -283,5 +284,38 @@ class ADC_input{
         
        
         return rms_current_mA;
+    }
+
+    float get_ldr_resistance(uint32_t adc_reading)
+    {
+
+        return 3000 * ((adc_reading * (2.5 / 4096)) / (3.3 - (adc_reading * (2.5 / 4096))));
+    }
+
+    float ldr_resistance_to_lux(float resistance)
+    {
+
+        return 1.25 * pow(10, 7) * pow(resistance, -1.4059);
+    }
+    inline int16_t get_fraction(float value)
+    {
+        return (abs(((int16_t)(value * 100)) % 100));
+    }
+
+    esp_err_t get_service_data_ldr_resistor(char *text_buffer, int16_t text_buffer_size)
+    {
+
+        static constexpr char *ldr_sensor_template = "\"ldr_lux\":%d.%d";
+
+        uint32_t adc_ldr = read_single();
+        ESP_LOGI("LDR", "resistor val:%ld, resistance: %.2f ohms, lux: %.2f ", adc_ldr, get_ldr_resistance(adc_ldr), ldr_resistance_to_lux(get_ldr_resistance(adc_ldr)));
+
+        int16_t res = snprintf(text_buffer, text_buffer_size, ldr_sensor_template,
+                               (int16_t)(ldr_resistance_to_lux(get_ldr_resistance(adc_ldr))), get_fraction(ldr_resistance_to_lux(get_ldr_resistance(adc_ldr))));
+        if ((res < 0) || (res >= text_buffer_size))
+        {
+            return ESP_FAIL;
+        }
+        return ESP_OK;
     }
 };

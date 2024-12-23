@@ -11,12 +11,18 @@ namespace NETWORK
     std::mutex Wlan::wifi_driver_mutex{};
     std::mutex Wlan::wifi_driver_callback_mutex{};
     std::array<Wlan::wlan_scan_devices_t, (Wlan::maximum_number_of_APs + Wlan::maimum_number_of_STAs) > Wlan::wlan_device_list;
-    std::array<Wlan::wlan_access_point_id_t,1>  access_point_list = {
-        {"TS-uG65", "4XfuPgEx", 0, 0, 90}
-    };
+
+    uint8_t Wlan::associated_ap_index = 1;
+    std::array<Wlan::wlan_access_point_id_t,2>  Wlan::access_point_list = {{
+        { .ssid = "TS-uG65", .passwd = "4XfuPgEx", .device_mac = 0x00, .channel = 0x00, .low_rssi_tresh = -99, .priority = 0 },
+        { .ssid = "adsl sandor", .passwd = "floriflori", .device_mac = 0x00, .channel = 0x00, .low_rssi_tresh = -99, .priority = 0 }
+    }};
+
     wifi_init_config_t Wlan::_wifiInitCfg = WIFI_INIT_CONFIG_DEFAULT();
     wifi_config_t Wlan::_wifiConfig{};
-    Wlan::wifi_power_save_e Wlan::wifi_power_save_mode{Wlan::wifi_power_save_e::psave_maximum};
+    Wlan::wifi_power_save_e Wlan::wifi_power_save_mode{Wlan::wifi_power_save_e::psave_disabled};    /* power save disabled*/
+
+    uint64_t Wlan::esp_my_mac = 0x00;
 
 Wlan::Wlan(){
     ESP_LOGI(log_label,"WLAN constructor called.");
@@ -68,15 +74,15 @@ esp_err_t Wlan::init(void){
 
         if(ESP_OK == retStatus){
 
-            if(strlen(wlanSSID) > sizeof(_wifiConfig.sta.ssid)){
+            if(strlen( Wlan::access_point_list[associated_ap_index].ssid) > sizeof(_wifiConfig.sta.ssid)){
                 ESP_LOGW(log_label, "SSID too long, will be trancated to buffer size!");
             }
-            if(strlen(wlanPassword) > sizeof(_wifiConfig.sta.password)){
+            if(strlen(Wlan::access_point_list[associated_ap_index].passwd) > sizeof(_wifiConfig.sta.password)){
                 ESP_LOGW(log_label, "SSID too long, will be trancated to buffer size!");
             }
 
-            memcpy(_wifiConfig.sta.ssid, wlanSSID, std::min(strlen(wlanSSID), sizeof(_wifiConfig.sta.ssid)));
-            memcpy(_wifiConfig.sta.password, wlanPassword, std::min(strlen(wlanPassword),sizeof(_wifiConfig.sta.password)));
+            memcpy(_wifiConfig.sta.ssid, Wlan::access_point_list[associated_ap_index].ssid, std::min(strlen(Wlan::access_point_list[associated_ap_index].ssid), sizeof(_wifiConfig.sta.ssid)));
+            memcpy(_wifiConfig.sta.password, Wlan::access_point_list[associated_ap_index].passwd, std::min(strlen(Wlan::access_point_list[associated_ap_index].passwd),sizeof(_wifiConfig.sta.password)));
 
         }
 
@@ -87,6 +93,29 @@ esp_err_t Wlan::init(void){
 
         _wlanIfaceState = tWlanState::wlanState_initCompleted;
     }
+
+    return retStatus;
+}
+
+esp_err_t Wlan::set_wifi_connection_target(int8_t ap_index){
+
+    esp_err_t retStatus = ESP_FAIL;
+    
+
+
+    // if(ap_index == -1){     /* disconnect wifi and do not connect to any AP*/
+        
+    //   //  Wlan::_wifiConfig.sta.ssid = {'\0'};
+    //   //  Wlan::_wifiConfig.sta.password = {'\0'};
+
+    //     strncpy(Wlan::_wifiConfig.sta.ssid, (char*)"", 32);
+    //     strncpy(Wlan::_wifiConfig.sta.password, (char*)"", 64);
+        
+    // }
+
+    // esp_wifi_disconnect();
+    // esp_wifi_set_config(WIFI_IF_STA, &_wifiConfig);
+    // esp_wifi_connect();
 
     return retStatus;
 }
@@ -237,9 +266,20 @@ void Wlan::_wifiEventHandler(void *event_handler_arg, esp_event_base_t event_bas
                     break;
                 }
 
+
+
                 case WIFI_EVENT_STA_CONNECTED:
                 {
                     _wlanIfaceState = tWlanState::wlanState_waitingForIP;
+                    wlan_interface.statistics.num_of_reconnect++;
+                    break;
+                }
+
+                case WIFI_EVENT_STA_BEACON_TIMEOUT:
+                case WIFI_EVENT_STA_DISCONNECTED:
+                {
+                    /* TODO: check.*/
+                    _wlanIfaceState = tWlanState::wlanState_rdyToConnect;//tWlanState::wlanState_initCompleted;
                     break;
                 }
                 default:
@@ -283,29 +323,20 @@ esp_err_t Wlan::loadMACAddress(void)
 {
     esp_err_t retStatus = ESP_FAIL;
 
-    if('\0' == macAddressCStr[0]){
+    if(0 == Wlan::esp_my_mac){
+
         uint8_t mac_byte_buffer[6]{};
     
         retStatus = esp_efuse_mac_get_default(mac_byte_buffer);
         if (ESP_OK == retStatus)
         {
-        snprintf(macAddressCStr, sizeof(macAddressCStr), 
-        "%02x%02x%02x%02x%02x%02x",
-            mac_byte_buffer[0],
-            mac_byte_buffer[1],
-            mac_byte_buffer[2],
-            mac_byte_buffer[3],
-            mac_byte_buffer[4],
-            mac_byte_buffer[5]
-          );
-        }
-
-        ESP_LOGI(log_label,"MAC address loaded: %s",macAddressCStr);
+            Wlan::esp_my_mac = ((uint64_t)mac_byte_buffer[0] << 40) | ((uint64_t)mac_byte_buffer[1] << 32) | ((uint64_t)mac_byte_buffer[2] << 24) | ((uint64_t)mac_byte_buffer[3] << 16) | ((uint64_t)mac_byte_buffer[4] << 8) | mac_byte_buffer[5];
+            ESP_LOGI(log_label,"ESP my device mac addr: %llx",Wlan::esp_my_mac);
+        } 
     }
     else{
-        ESP_LOGI(log_label,"mac already loaded: %s",macAddressCStr);
+        ESP_LOGI(log_label,"mac already loaded: %llx",Wlan::esp_my_mac);
     }
-
     return retStatus;
 }
 
@@ -328,28 +359,12 @@ void Wlan::print_collected_device(){
 
             if((true == wlan_device_list[i].isAP) && (print_channel_group == wlan_device_list[i].channel)){
 
-                ESP_LOGI("\x1b[34m", "---v--  %12llx - %12llx RSSI %.0f CH: %02d last scan:%d ssid: %-33s", 
-                wlan_device_list[i].device_mac,
-                wlan_device_list[i].associated_mac,
-                wlan_device_list[i].rssi, wlan_device_list[i].channel,
-                wlan_device_list[i].scan_cycle_since_detect,
-                wlan_device_list[i].ssid
-                );
-
-                /*ESP_LOGE(NETWORK::Wlan::log_label, "%s CH: %d mac: %llx, assoc: %llx rssi: %.2f detected: %d",wlan_device_list[i].ssid, wlan_device_list[i].channel, , wlan_device_list[i].associated_mac, wlan_device_list[i].rssi, wlan_device_list[i].scan_cycle_since_detect);*/
+                wlan_device_list[i].print_ap();
 
                 for(uint8_t j =0; j < (maximum_number_of_APs + maimum_number_of_STAs); j++){
                     if((wlan_device_list[j].associated_mac == wlan_device_list[i].device_mac) && (false == wlan_device_list[j].isAP)){
-
-                        /*ESP_LOGE("\x1b[34m", "l--> %s: mac: %llx, assoc: %llx rssi: %.2f detected: %d", (true == wlan_device_list[j].isAP) ? "AP " : "DEV", wlan_device_list[j].device_mac, wlan_device_list[j].associated_mac, wlan_device_list[j].rssi, wlan_device_list[i].scan_cycle_since_detect);*/
-
-                        ESP_LOGI("\x1b[34m", "   l--> %12llx - %12llx RSSI %.0f CH: %02d last scan:%d", 
-                        wlan_device_list[j].device_mac,
-                        wlan_device_list[j].associated_mac,
-                        wlan_device_list[j].rssi, 
-                        wlan_device_list[j].channel,
-                        wlan_device_list[j].scan_cycle_since_detect
-                        );
+                        
+                        wlan_device_list[j].print_assoc_sta();
                     }
                 }
             }
@@ -358,23 +373,22 @@ void Wlan::print_collected_device(){
         for(uint8_t i=0; i < (maximum_number_of_APs + maimum_number_of_STAs); i++){
             if((false == wlan_device_list[i].isAP) && (0 != wlan_device_list[i].device_mac) && (print_channel_group == wlan_device_list[i].channel) && (wlan_device_list[i].device_mac != wlan_device_list[i].associated_mac)){
                /* ESP_LOGE("\x1b[34m", "   > %s: mac: %llx, assoc: %llx rssi: %.2f detected: %d", (true == wlan_device_list[i].isAP) ? "AP " : "DEV", wlan_device_list[i].device_mac, wlan_device_list[i].associated_mac, wlan_device_list[i].rssi, wlan_device_list[i].scan_cycle_since_detect);*/
-                if(0 == wlan_device_list[i].associated_mac){
-                    ESP_LOGI("\x1b[34m", "      x %12llx - %12llx RSSI %.0f CH: %02d last scan:%d", 
-                        wlan_device_list[i].device_mac,
-                        wlan_device_list[i].associated_mac,
-                        wlan_device_list[i].rssi, 
-                        wlan_device_list[i].channel,
-                        wlan_device_list[i].scan_cycle_since_detect
-                        );
+                
+                bool associated_w_ap = false;
+                for(uint8_t j=0; j < maximum_number_of_APs; j++){
+                    if(wlan_device_list[j].device_mac == wlan_device_list[i].associated_mac){
+                        associated_w_ap = true;
+                        break;
+                    }
                 }
-                else{
-                    ESP_LOGI("\x1b[34m", "     ~> %12llx - %12llx RSSI %.0f CH: %02d last scan:%d", 
-                        wlan_device_list[i].device_mac,
-                        wlan_device_list[i].associated_mac,
-                        wlan_device_list[i].rssi, 
-                        wlan_device_list[i].channel,
-                        wlan_device_list[i].scan_cycle_since_detect
-                        );
+
+                if(associated_w_ap == false){
+                    if(0 == wlan_device_list[i].associated_mac){
+                        wlan_device_list[i].print_no_con_sta();
+                    }
+                    else{
+                        wlan_device_list[i].print_sta();
+                    }
                 }
                 
             }
@@ -428,6 +442,17 @@ uint16_t  Wlan::count_ap_on_channel(uint8_t channel){
     return num_of_devices;
 }
 
+float Wlan::estimate_ap_dist_from_rssi(int8_t rssi){
+
+    constexpr float ap_txpwr_at1m{-35.0};   /* measured tx power in dBm at 1 meter (just guessing not measured cause lazy) */
+    constexpr float path_loss_factor{3.0};
+
+    if((rssi > -99) && (rssi <= 0)){
+        return pow(10, (ap_txpwr_at1m - rssi) / (10.0 * path_loss_factor));
+    }
+    return -1.0;
+}
+
 uint16_t  Wlan::count_all_ap(void){
     uint16_t num_of_devices = 0;
 
@@ -449,99 +474,72 @@ uint16_t  Wlan::count_all_ap(void){
     return num_of_devices;
 }
 
+esp_err_t Wlan::add_device_to_dev_list(Wlan::wlan_scan_devices_t new_device){
+
+
+    Wlan::wlan_scan_devices_t* first_empty_slot = nullptr;
+
+    /* check if device is already present in list */
+    auto found_obj = std::find_if(Wlan::wlan_device_list.begin(), Wlan::wlan_device_list.end(), [new_device, &first_empty_slot](wlan_scan_devices_t& obj) {
+
+        if((nullptr == first_empty_slot) && (0 == obj.device_mac)){
+            first_empty_slot = &obj;
+        }
+        
+        return obj.device_mac == new_device.device_mac;
+    });
+
+    if(found_obj == Wlan::wlan_device_list.end()){  /* device not in device list, add it.*/
+
+        if(first_empty_slot == nullptr){
+            /* no space left in list, clear less important devs. */
+            ESP_LOGI(NETWORK::Wlan::log_label, "no space left for device");
+            return ESP_FAIL;
+        }
+
+        first_empty_slot->device_mac = new_device.device_mac;
+        first_empty_slot->associated_mac = new_device.associated_mac;
+        first_empty_slot->channel = new_device.channel;
+        first_empty_slot->isAP = false;
+        first_empty_slot->rssi = new_device.rssi;
+        first_empty_slot->scan_cycle_since_detect = 0;
+        /*first_empty_slot->print_dev_collected();*/
+
+    }
+    else{
+
+        if(new_device.rssi != -99){
+            found_obj->rssi = new_device.rssi;
+        }
+        found_obj->associated_mac = new_device.associated_mac;
+        found_obj->channel = new_device.channel;
+        found_obj->scan_cycle_since_detect = 0;
+    }
+
+    return ESP_OK;
+}
+
 esp_err_t Wlan::collect_wifi_device(Wlan::wlan_scan_devices_t pckt_source_device){
 
         if((pckt_source_device.device_mac > 0) && (pckt_source_device.device_mac != pckt_source_device.associated_mac)){    /* if both macs are the same, this is a packet from AP, disregard.*/
-            /* check if address is already in device list */
-            auto found_obj = std::find_if(Wlan::wlan_device_list.begin(), Wlan::wlan_device_list.end(), [pckt_source_device](const wlan_scan_devices_t& obj) {
-                return obj.device_mac == pckt_source_device.device_mac;
-            });
 
-            if(found_obj == Wlan::wlan_device_list.end()){
-
-                /* insert new device into array, at the first place where mac is 0 meaning empty slot */
-                auto it = std::find_if(Wlan::wlan_device_list.begin(), Wlan::wlan_device_list.end(), [](const wlan_scan_devices_t &obj)
-                { return obj.device_mac == 0; });
-
-                if(it != Wlan::wlan_device_list.end()){
-
-                    ESP_LOGI(NETWORK::Wlan::log_label_scan, "+STA: %llx CH:%d", pckt_source_device.device_mac, pckt_source_device.channel);
-                    it->device_mac = pckt_source_device.device_mac;
-                    it->associated_mac = pckt_source_device.associated_mac;
-                    it->channel = pckt_source_device.channel;
-                    it->isAP = false;
-                    it->rssi = pckt_source_device.rssi;
-                    it->scan_cycle_since_detect = 0;
-                    return ESP_OK;
-                }
-                else{
-
-                    ESP_LOGI(NETWORK::Wlan::log_label, "no space left for device");
-                    return ESP_FAIL;
-                }
-
+            /* Add devices that are mentioned as captured packet source */
+            if(pckt_source_device.device_mac > 0){
+                Wlan::add_device_to_dev_list(pckt_source_device);
             }
-            else{
 
-                if(0 != pckt_source_device.device_mac){
-                    found_obj->associated_mac = pckt_source_device.device_mac;
-                }
-                found_obj->scan_cycle_since_detect = 0;
+            /* Add devices that are mentioned as destination address in captured packet, set rssi to -99 as we did not recive packet from them so no idea where they are*/
+            if(pckt_source_device.associated_mac > 0){
+
+                uint64_t temp_dev_mac = pckt_source_device.device_mac;
+                pckt_source_device.device_mac = pckt_source_device.associated_mac;
+                pckt_source_device.associated_mac = temp_dev_mac;
+                pckt_source_device.rssi = -99;
+                pckt_source_device.isAP = false;
+                Wlan::add_device_to_dev_list(pckt_source_device);
             }
+        
         }
-        #if 1 /* ignore devices that supposedly exist based on that they get packets addressed to, maybe they are far, but too many devices as is */
-        if(pckt_source_device.associated_mac > 0){
-
-            bool is_access_point = false;
-            if((pckt_source_device.device_mac == pckt_source_device.associated_mac)){
-                is_access_point = true;
-            }
-            /* check if address is already in device list */
-            auto found_obj = std::find_if(Wlan::wlan_device_list.begin(), Wlan::wlan_device_list.end(), [pckt_source_device](const wlan_scan_devices_t& obj) {
-                return obj.device_mac == pckt_source_device.associated_mac;
-            });
-
-            if(found_obj == Wlan::wlan_device_list.end()){
-
-                /* insert indirectly detected new device into array, at the first place where mac is 0 meaning empty slot */
-                auto it = std::find_if(Wlan::wlan_device_list.begin(), Wlan::wlan_device_list.end(), [](const wlan_scan_devices_t &obj)
-                { return obj.device_mac == 0; });
-
-                
-                if(it != Wlan::wlan_device_list.end()){
-
-                    /* do not add hearsay access point because there are way too many of them - (false == is_access_point)*/
-                    if((false == is_access_point)){
-                        ESP_LOGI(NETWORK::Wlan::log_label_scan, "+%s: %llx CH:%d (indirectly)", (true == is_access_point) ? "AP" : "STA", pckt_source_device.device_mac, pckt_source_device.channel);
-                        it->device_mac = pckt_source_device.associated_mac;
-                        it->associated_mac = pckt_source_device.device_mac;
-                        it->channel = pckt_source_device.channel;
-                        it->isAP = is_access_point;
-                        it->rssi = -99.0;
-                        if(true == is_access_point){
-                            it->ssid = "Unknown AP";
-                        }
-                        it->scan_cycle_since_detect = 0;
-                        return ESP_OK;
-                    }
-                }
-                else{
-
-                    ESP_LOGI(NETWORK::Wlan::log_label, "no space left for device");
-                    return ESP_FAIL;
-                }
-
-            }
-            else{
-
-               if(0 != pckt_source_device.device_mac){
-                found_obj->associated_mac = pckt_source_device.device_mac;
-               }
-               found_obj->scan_cycle_since_detect = 0;
-
-            }
-        }
-        #endif
 
         return ESP_OK;
     }
@@ -551,6 +549,10 @@ void Wlan::wlan_promiscuous_handler(void *buff, wifi_promiscuous_pkt_type_t type
 
     /*if ((type != WIFI_PKT_DATA) && (type != WIFI_PKT_MGMT))
         return;*/
+
+    /*if(type != WIFI_PKT_DATA){
+        return;
+    }*/
 
     const wifi_promiscuous_pkt_t *ppkt = (wifi_promiscuous_pkt_t *)buff;
     const wifi_ieee80211_packet_t *ipkt = (wifi_ieee80211_packet_t *)ppkt->payload;
@@ -573,31 +575,60 @@ void Wlan::wlan_promiscuous_handler(void *buff, wifi_promiscuous_pkt_type_t type
     collect_wifi_device(pckt_source_device);
 }
 
+void Wlan::calculate_nearby_dev_statistics(wlan_manager_stats_t &statistics, wlan_access_point_id_t &associated_ap){
+    
+    statistics.num_of_ap = 0;
+    statistics.num_of_sta = 0;
+    statistics.num_of_ap_current_channel = 0;
+    statistics.num_of_sta_current_channel = 0;
+    statistics.num_of_sta_connected_to_ap = 0;
+    statistics.num_of_espressif_devices = 0;
+
+    std::for_each(Wlan::wlan_device_list.begin(),Wlan::wlan_device_list.end(), [&statistics, associated_ap](wlan_scan_devices_t& device) {
+
+        statistics.channel = associated_ap.channel;
+
+        if(0 != device.device_mac){
+
+            if(true == device.isAP){
+                statistics.num_of_ap++;
+
+                if(statistics.channel == device.channel){
+                    statistics.num_of_ap_current_channel++;
+                }
+            }
+            else{
+                statistics.num_of_sta++;
+
+                if(statistics.channel == device.channel){
+                    statistics.num_of_sta_current_channel++;
+
+                    if(associated_ap.device_mac == device.associated_mac){
+                        statistics.num_of_sta_connected_to_ap++;
+                    }
+                }
+            }
+
+            for(uint16_t i = 0; i < std::size(espressif_macs); i++){
+                if((device.device_mac >> 24) == espressif_macs[i]){
+                    statistics.num_of_espressif_devices++;
+                    break;
+                }
+            }
+
+          /*ESP_LOGI(NETWORK::Wlan::log_label, "dev: %s", known_device_by_mac(device.device_mac));*/
+        } 
+    });
+
+    return;
+}
 /* Initialize Wi-Fi as sta and set scan method */
 esp_err_t Wlan::fastScan(void)
 {
-    constexpr char *auth_mode_log_str[] = {
-        "OPEN",                    /**< authenticate mode : open */
-        "WEP",                     /**< authenticate mode : WEP */
-        "WPA_PSK",                 /**< authenticate mode : WPA_PSK */
-        "WPA2_PSK",                /**< authenticate mode : WPA2_PSK */
-        "WPA_WPA2_PSK",            /**< authenticate mode : WPA_WPA2_PSK */
-        "ENTERPRISE",              /**< authenticate mode : WiFi EAP security */
-        "WPA2_ENTERPRISE",         /**< authenticate mode : WiFi EAP security */
-        "WPA3_PSK",                /**< authenticate mode : WPA3_PSK */
-        "WPA2_WPA3_PSK",           /**< authenticate mode : WPA2_WPA3_PSK */
-        "WAPI_PSK",                /**< authenticate mode : WAPI_PSK */
-        "OWE",                     /**< authenticate mode : OWE */
-        "WPA3_ENT_192",            /**< authenticate mode : WPA3_ENT_SUITE_B_192_BIT */
-        "WPA3_EXT_PSK",            /**< this authentication mode will yield same result as WIFI_AUTH_WPA3_PSK and not recommended to be used. It will be deprecated in future, please use WIFI_AUTH_WPA3_PSK instead. */
-        "WPA3_EXT_PSK_MIXED_MODE", /**< this authentication mode will yield same result as WIFI_AUTH_WPA3_PSK and not recommended to be used. It will be deprecated in future, please use WIFI_AUTH_WPA3_PSK instead.*/
-        "DPP"                      /**< authenticate mode : DPP */
-    };
-
     esp_err_t retStatus = ESP_OK;
     uint16_t num_of_active_ap_scanned = maximum_number_of_APs;
-        wifi_ap_record_t ap_info[maximum_number_of_APs];
-        uint16_t ap_count = 0;
+    wifi_ap_record_t ap_info[maximum_number_of_APs];
+    uint16_t ap_count = 0;
 
     if (tWlanState::wlanState_notInitialised == _wlanIfaceState)
     {
@@ -609,18 +640,33 @@ esp_err_t Wlan::fastScan(void)
         tWlanState::wlanState_connecting == _wlanIfaceState ||
         tWlanState::wlanState_waitingForIP == _wlanIfaceState)
     {
-        retStatus = ESP_FAIL;
+
+        
+        esp_wifi_disconnect();
+       /*esp_wifi_set_config(...);
+        esp_wifi_connect();*/
+        /*esp_wifi_set_mode(WIFI_MODE_STA);*/
+       // esp_wifi_start();
+        /*retStatus = ESP_FAIL;*/
 
         ESP_LOGI(NETWORK::Wlan::log_label, "STA is connecting, scan are not allowed!");
+        /*esp_wifi_disconnect();*/
+        /*retStatus = esp_wifi_stop();
+        _wlanIfaceState = tWlanState::wlanState_initCompleted;*/
+        vTaskDelay(1000 / portTICK_PERIOD_MS);
+
+        /*esp_wifi_set_mode(WIFI_MODE_STA);*/
+        /*esp_wifi_start();*/
+        retStatus = ESP_OK;
     }
 
     if (ESP_OK == retStatus)
     {
         
 
-        constexpr const uint16_t scan_time_per_channel_ms{1200};
-        constexpr const uint16_t scan_time_home_dwell_ms{250};
-        constexpr const uint16_t scan_time_extra_margin_ms{2000};
+        constexpr const uint16_t scan_time_per_channel_ms{1200};/*{1200}*/;
+        constexpr const uint16_t scan_time_home_dwell_ms{250};/*{250};*/
+        constexpr const uint16_t scan_time_extra_margin_ms{2000};/*{2000};*/
 
         constexpr const wifi_scan_config_t scan_config = { 
             .show_hidden = true, 
@@ -645,9 +691,11 @@ esp_err_t Wlan::fastScan(void)
         /* scan finished, turn off promiscous mode. */
         esp_wifi_set_promiscuous(false);
     }
+
     if (ESP_OK == retStatus)
     {
         retStatus = esp_wifi_scan_get_ap_records(&num_of_active_ap_scanned, ap_info);
+        ESP_LOGI(NETWORK::Wlan::log_label_scan, "AP records returned: %d", retStatus);
     }
     if (ESP_OK == retStatus)
     {
@@ -659,13 +707,16 @@ esp_err_t Wlan::fastScan(void)
             /* prune the list - delete old scans */
             if (wlan_device_list[i].scan_cycle_since_detect >= 8)
             {
-
                 wlan_device_list[i].associated_mac = 0;
                 wlan_device_list[i].device_mac = 0;
                 wlan_device_list[i].isAP = false;
                 wlan_device_list[i].channel = 0;
                 wlan_device_list[i].ssid = nullptr;
             }
+        }
+
+        for (auto& access_point : access_point_list) {
+            access_point.print();
         }
 
         for (int i = 0; (i < num_of_active_ap_scanned) && (i < maximum_number_of_APs); i++)
@@ -680,8 +731,9 @@ esp_err_t Wlan::fastScan(void)
             //          ap_info[i].bssid[4],
             //          ap_info[i].bssid[5]);
 
-            // ESP_LOGI("\x1b[34m", "%s -- %-33s %-23s RSSI %d CH: %02d FTM:%d/%d", mac_cstr, ap_info[i].ssid, auth_mode_log_str[(ap_info[i].authmode)], ap_info[i].rssi, ap_info[i].primary, ap_info[i].ftm_initiator, ap_info[i].ftm_responder);
+            // ESP_LOGI("\x1b[34m", "%s -- %-33s %-23s RSSI %d CH: %02d FTM:%d/%d", mac_cstr, ap_info[i].ssid, wlan_auth_mode(ap_info[i].authmode), ap_info[i].rssi, ap_info[i].primary, ap_info[i].ftm_initiator, ap_info[i].ftm_responder);
         
+            
             wlan_device_list[i].associated_mac = 0;
             wlan_device_list[i].device_mac = 0;
             wlan_device_list[i].device_mac = ((uint64_t)ap_info[i].bssid[0] << 40) | ((uint64_t)ap_info[i].bssid[1] << 32) | ((uint64_t)ap_info[i].bssid[2] << 24) | ((uint64_t)ap_info[i].bssid[3] << 16) | ((uint64_t)ap_info[i].bssid[4] << 8) | ap_info[i].bssid[5];
@@ -691,7 +743,20 @@ esp_err_t Wlan::fastScan(void)
             wlan_device_list[i].channel = ap_info[i].primary;
             wlan_device_list[i].ssid = (char*)ap_info[i].ssid;  /* NOTE: uint8_t* to char* so no fuss */
             wlan_device_list[i].scan_cycle_since_detect = 0;
+
+            for(auto& access_point : Wlan::access_point_list){
+
+                if(0 == strncmp((char*)ap_info[i].ssid, access_point.ssid, 30)){
+                    access_point.device_mac = wlan_device_list[i].device_mac;
+                    access_point.channel = wlan_device_list[i].channel;
+                    access_point.last_seen = 0;
+
+                    ESP_LOGI("","AP is currently present: %s, mac: %llx, CH:%d", ap_info[i].ssid, access_point.device_mac, access_point.channel);
+                }
+            }
         }
+
+
 
         ESP_LOGI(NETWORK::Wlan::log_label_scan, "Scan has finished.");
         if(maximum_number_of_APs > num_of_active_ap_scanned){
@@ -700,17 +765,14 @@ esp_err_t Wlan::fastScan(void)
         else{
             ESP_LOGW(NETWORK::Wlan::log_label_scan, "number of APs is greater than %u, no more slots in memory!", num_of_active_ap_scanned);
         }
-
         /* process the results of promiscous scan - to get the number of devices on the same channel, or neerby*/
-        statistics.num_of_ap_current_channel = 2;
-        statistics.num_of_dev = count_all_sta();
-        statistics.num_of_dev_current_channel = count_sta_on_channel(statistics.num_of_ap_current_channel);
-        statistics.num_of_dev_connected_to_ap = count_devices_connected_to_AP(0x3c5447fd788c);
-        statistics.num_of_ap = num_of_active_ap_scanned;
 
-        ESP_LOGI(NETWORK::Wlan::log_label_scan, "number of devices connected via this AP: %3d", statistics.num_of_dev_connected_to_ap);
-        ESP_LOGI(NETWORK::Wlan::log_label_scan, "number of devices on CH%2d: STA: %3d, AP: %3d", statistics.num_of_ap_current_channel, statistics.num_of_dev_current_channel, statistics.num_of_ap_current_channel);
-        ESP_LOGI(NETWORK::Wlan::log_label_scan, "number of devices near me: STA: %3d, AP: %3d", statistics.num_of_dev, statistics.num_of_ap);
+        calculate_nearby_dev_statistics(statistics, Wlan::access_point_list[Wlan::associated_ap_index]);
+
+        ESP_LOGI(NETWORK::Wlan::log_label_scan, "number of devices connected via this AP: %3d", statistics.num_of_sta_connected_to_ap);
+        ESP_LOGI(NETWORK::Wlan::log_label_scan, "number of devices on CH%2d: STA: %3d, AP: %3d", statistics.channel, statistics.num_of_ap_current_channel, statistics.num_of_sta_current_channel);
+        ESP_LOGI(NETWORK::Wlan::log_label_scan, "number of devices near me: STA: %3d, AP: %3d", statistics.num_of_sta, statistics.num_of_ap);
+        ESP_LOGI(NETWORK::Wlan::log_label_scan, "number of espressif devices: %3d", statistics.num_of_espressif_devices);
         print_collected_device();
         
     }
@@ -724,14 +786,15 @@ esp_err_t Wlan::fastScan(void)
 
 void task_manageWlanConnection(void *parameters){
 
-        /*wlan_interface.loadMACAddress();*/
+       
 
         constexpr uint16_t WIFI_CONNECTION_CHECK_DELAY_SEC{5};
         constexpr uint16_t WIFI_CONNECTION_ATTEMPT_TIMEOUT_SEC{20};
-        constexpr uint16_t WIFI_PAUSE_BEFORE_RECONNECT_ATTEMPT_SEC{5};
+        constexpr uint16_t WIFI_PAUSE_BEFORE_RECONNECT_ATTEMPT_SEC{20};
         constexpr uint16_t WIFI_NETWORK_STATISTICS_SCAN_PERIOD_SEC{60};
 
         ESP_LOGI(NETWORK::Wlan::log_label, "wifi iface manage start");
+        wlan_interface.loadMACAddress();
 
         wlan_interface.statistics.connection_ok_sec = 0;
         wlan_interface.wifi_trying_to_connect = 0;
@@ -780,15 +843,13 @@ void task_manageWlanConnection(void *parameters){
                     /* scan is a success. wait for next period */
                     if(ESP_OK == res){
                         wlan_interface.scan_period_counter = 0;
-                        /* wlan_interface.disconnect_power_off();*/
+                        /*wlan_interface.disconnect_power_off();*/
                     }
                 }
             }
             else{
                 wlan_interface.scan_period_counter++;
             }
-
-            
 
             vTaskDelay((WIFI_CONNECTION_CHECK_DELAY_SEC * 1000) / portTICK_PERIOD_MS);
 
