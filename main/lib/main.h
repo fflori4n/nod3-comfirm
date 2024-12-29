@@ -33,8 +33,9 @@
 #include "bmx280/bmx280.c"
 #include "analogue_in/analogue_in.cpp"
 #include "ha_websocket/ha_websocket.cpp"
-#include "mcu_info/mcu_info.cpp"
 #include "sleep_manager/sleep_manager.cpp"
+#include "mcu_info/mcu_info.cpp"
+
 
 class Main final{
 public:

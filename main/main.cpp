@@ -60,9 +60,9 @@ extern "C" void app_main(void)
 
 esp_err_t Main::init(void){
 
-    vTaskDelay(100/ portTICK_PERIOD_MS);
-    printf("DBG_UART OK");
-    printf("INIT");
+    vTaskDelay(2000/ portTICK_PERIOD_MS); /* wait for debugger UART to connect, only for dev. */
+    ESP_LOGI("DBG_UART", "[ OK ]");
+    ESP_LOGI("INIT STUB", "");
     night_man.execute_wake_stub();
     
     
@@ -85,19 +85,6 @@ esp_err_t Main::init(void){
     0
   );
 
-    constexpr uint32_t sntp_sync_seconds{30*60*1000};
-    
-    ntpTime.sntp_init("pool.ntp.org", 10000, sntp_sync_seconds);
-
-
-    if(ESP_OK != i2c_param_config(I2C_NUM_0, &i2c_cfg)){
-        ESP_LOGE("I2C_INIT", "failed to set I2C config");
-    }
-    if(ESP_OK != i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0)){
-        ESP_LOGE("I2C_INIT", "driver install failed");
-    }
-
-    ambient_bme280.begin(I2C_NUM_0, "BMX0", 19.0);
     // bmx280 = bmx280_create(I2C_NUM_0);
 
     // if (!bmx280) { 
@@ -112,9 +99,23 @@ esp_err_t Main::init(void){
     /*current_transformer_pin.configure(ADC_WIDTH_BIT_12, 1u);*/
     ldr_resistor.configure(ADC_WIDTH_BIT_12, 1u);
 
-   mcu_info.load_session_nonchanging();
+    mcu_info.load_session_nonchanging();
     mcu_info.update_mcu_telemetry();
     mcu_info.print_detailed();
+
+    if(ESP_OK != i2c_param_config(I2C_NUM_0, &i2c_cfg)){
+        ESP_LOGE("I2C_INIT", "failed to set I2C config");
+    }
+    if(ESP_OK != i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0)){
+        ESP_LOGE("I2C_INIT", "driver install failed");
+    }
+
+    ambient_bme280.begin(I2C_NUM_0, "BMX0", 19.0);
+
+    constexpr uint32_t sntp_sync_seconds{30*60*1000};
+    
+    ntpTime.sntp_init("pool.ntp.org", 10000, sntp_sync_seconds);
+
     vTaskDelay(1000/portTICK_PERIOD_MS);
 
     return (esp_err_t)ESP_OK;
@@ -126,9 +127,10 @@ void Main::loop(void){
 
     //printf("Main task\n");
     //ntpTime.print();
-    Ntp_time::esp_uptime = (esp_timer_get_time()/1000000);
+    /*Ntp_time::esp_uptime += (esp_timer_get_time()/1000000);*/
 
     wlan_interface.fastScan();
+    vTaskDelay(5000/portTICK_PERIOD_MS);
     wlan_interface.fastScan();
 
     
@@ -186,8 +188,8 @@ void Main::loop(void){
     else
     {
 
-        /*snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
-        ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);*/
+        snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
+        ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
 
         /* c0_current_sensor.get_service_data(mqtt_service_data_buffer, 2048);
          ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
@@ -196,22 +198,24 @@ void Main::loop(void){
 
         ambient_bme280.get_service_data(mqtt_service_data_buffer, 2048);
         ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
-        /*snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
-        ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);*/
+        snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
+        ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
 
         ldr_resistor.get_service_data_ldr_resistor(mqtt_service_data_buffer, 2048);
         ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
-        /*snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
-        ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);*/
+        snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
+        ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
 
         mcu_info.get_service_data(mqtt_service_data_buffer, 2048);
         ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
-        /*snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
-        ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);*/
+        snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
+        ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
+
+        ESP_LOGI("hello", "awake vs sleep seconds: %lld : %lld", nv_mcu_awake_sec, nv_mcu_sleep_sec);
 
         ha_websoc.disconnect();
 
-        night_man.schedule_rtc_wakeup(30000);
+        night_man.schedule_rtc_wakeup(180000);
         night_man.enter_deep_sleep();
 
         
@@ -241,7 +245,7 @@ void Main::loop(void){
     // ESP_LOGI("ADC_READ", "%ld", adc_reading);
 
     vTaskDelay(30000/ portTICK_PERIOD_MS);
-    nv_mcu_uptime_sec += 30;
+    /*nv_mcu_uptime_sec += 30;*/
     fflush(stdout);
     return;
 }

@@ -8,11 +8,12 @@ namespace NETWORK
     
     
     Wlan::tWlanState Wlan::_wlanIfaceState{Wlan::tWlanState::wlanState_notInitialised};
+    Wlan::wlan_manager_stats_t Wlan::statistics;
     std::mutex Wlan::wifi_driver_mutex{};
     std::mutex Wlan::wifi_driver_callback_mutex{};
     std::array<Wlan::wlan_scan_devices_t, (Wlan::maximum_number_of_APs + Wlan::maimum_number_of_STAs) > Wlan::wlan_device_list;
 
-    uint8_t Wlan::associated_ap_index = 1;
+    uint8_t Wlan::associated_ap_index = 0;
     std::array<Wlan::wlan_access_point_id_t,2>  Wlan::access_point_list = {{
         { .ssid = "TS-uG65", .passwd = "4XfuPgEx", .device_mac = 0x00, .channel = 0x00, .low_rssi_tresh = -99, .priority = 0 },
         { .ssid = "adsl sandor", .passwd = "floriflori", .device_mac = 0x00, .channel = 0x00, .low_rssi_tresh = -99, .priority = 0 }
@@ -20,7 +21,7 @@ namespace NETWORK
 
     wifi_init_config_t Wlan::_wifiInitCfg = WIFI_INIT_CONFIG_DEFAULT();
     wifi_config_t Wlan::_wifiConfig{};
-    Wlan::wifi_power_save_e Wlan::wifi_power_save_mode{Wlan::wifi_power_save_e::psave_disabled};    /* power save disabled*/
+    Wlan::wifi_power_save_e Wlan::wifi_power_save_mode{Wlan::wifi_power_save_e::psave_default};    /* power save min*/
 
     uint64_t Wlan::esp_my_mac = 0x00;
 
@@ -162,6 +163,11 @@ esp_err_t Wlan::disconnect_power_off(void)
             retStatus = esp_wifi_disconnect(); /* Graceful disconnect from AP, or NOT connceted/ No init return if not connected*/
             _wlanIfaceState = tWlanState::wlanState_disconnected;
 
+            if(Wlan::statistics.num_of_reconnect >= 1){
+                Wlan::statistics.num_of_reconnect--;
+            }
+            
+
             if ((ESP_ERR_WIFI_NOT_STARTED != retStatus) /*&& (ESP_ERR_WIFI_NOT_INIT != retStatus)*/)
             {
                 ESP_LOGI(NETWORK::Wlan::log_label, "stopping wlan iface");
@@ -271,7 +277,7 @@ void Wlan::_wifiEventHandler(void *event_handler_arg, esp_event_base_t event_bas
                 case WIFI_EVENT_STA_CONNECTED:
                 {
                     _wlanIfaceState = tWlanState::wlanState_waitingForIP;
-                    wlan_interface.statistics.num_of_reconnect++;
+                    Wlan::statistics.num_of_reconnect++;
                     break;
                 }
 
@@ -280,6 +286,7 @@ void Wlan::_wifiEventHandler(void *event_handler_arg, esp_event_base_t event_bas
                 {
                     /* TODO: check.*/
                     _wlanIfaceState = tWlanState::wlanState_rdyToConnect;//tWlanState::wlanState_initCompleted;
+                    wlan_interface.statistics.connection_ok_sec = 0;
                     break;
                 }
                 default:
@@ -355,7 +362,7 @@ void Wlan::print_collected_device(){
     for(uint8_t print_channel_group = 0; print_channel_group < 13; print_channel_group++){
 
         ESP_LOGI("\x1b[34m", "CH: %2d ---- ---- ---- ---- ---- ----", print_channel_group);
-        for(uint8_t i=0; i < maximum_number_of_APs; i++){
+        for(uint8_t i=0; i < maximum_number_of_APs + maimum_number_of_STAs; i++){
 
             if((true == wlan_device_list[i].isAP) && (print_channel_group == wlan_device_list[i].channel)){
 
@@ -500,9 +507,10 @@ esp_err_t Wlan::add_device_to_dev_list(Wlan::wlan_scan_devices_t new_device){
         first_empty_slot->device_mac = new_device.device_mac;
         first_empty_slot->associated_mac = new_device.associated_mac;
         first_empty_slot->channel = new_device.channel;
-        first_empty_slot->isAP = false;
+        first_empty_slot->isAP = new_device.isAP;
         first_empty_slot->rssi = new_device.rssi;
         first_empty_slot->scan_cycle_since_detect = 0;
+        first_empty_slot->ssid = std::string(new_device.ssid);  /* this does deep copy */
         /*first_empty_slot->print_dev_collected();*/
 
     }
@@ -514,6 +522,8 @@ esp_err_t Wlan::add_device_to_dev_list(Wlan::wlan_scan_devices_t new_device){
         found_obj->associated_mac = new_device.associated_mac;
         found_obj->channel = new_device.channel;
         found_obj->scan_cycle_since_detect = 0;
+        found_obj->isAP = new_device.isAP;
+        found_obj->ssid = std::string(new_device.ssid);  /* this does deep copy */
     }
 
     return ESP_OK;
@@ -536,6 +546,7 @@ esp_err_t Wlan::collect_wifi_device(Wlan::wlan_scan_devices_t pckt_source_device
                 pckt_source_device.associated_mac = temp_dev_mac;
                 pckt_source_device.rssi = -99;
                 pckt_source_device.isAP = false;
+                pckt_source_device.ssid = "";
                 Wlan::add_device_to_dev_list(pckt_source_device);
             }
         
@@ -572,6 +583,7 @@ void Wlan::wlan_promiscuous_handler(void *buff, wifi_promiscuous_pkt_type_t type
 
     pckt_source_device.rssi = ppkt->rx_ctrl.rssi;
     pckt_source_device.channel = ppkt->rx_ctrl.channel;
+    pckt_source_device.isAP = false;
     collect_wifi_device(pckt_source_device);
 }
 
@@ -664,7 +676,7 @@ esp_err_t Wlan::fastScan(void)
     {
         
 
-        constexpr const uint16_t scan_time_per_channel_ms{1200};/*{1200}*/;
+        constexpr const uint16_t scan_time_per_channel_ms{500};/*{1200}*/;
         constexpr const uint16_t scan_time_home_dwell_ms{250};/*{250};*/
         constexpr const uint16_t scan_time_extra_margin_ms{2000};/*{2000};*/
 
@@ -700,7 +712,7 @@ esp_err_t Wlan::fastScan(void)
     if (ESP_OK == retStatus)
     {
         /* new scan results are ready, before updating devices list, prune the list of old or weak devices */
-        for (uint8_t i = 0; i < (maximum_number_of_APs + maimum_number_of_STAs); i++)
+        for (uint16_t i = 0; i < (maximum_number_of_APs + maimum_number_of_STAs); i++)
         {
             wlan_device_list[i].scan_cycle_since_detect++;
 
@@ -711,7 +723,7 @@ esp_err_t Wlan::fastScan(void)
                 wlan_device_list[i].device_mac = 0;
                 wlan_device_list[i].isAP = false;
                 wlan_device_list[i].channel = 0;
-                wlan_device_list[i].ssid = nullptr;
+                wlan_device_list[i].ssid = "";
             }
         }
 
@@ -719,44 +731,45 @@ esp_err_t Wlan::fastScan(void)
             access_point.print();
         }
 
-        for (int i = 0; (i < num_of_active_ap_scanned) && (i < maximum_number_of_APs); i++)
+       
+
+        std::for_each(std::begin(ap_info), std::end(ap_info), [&](wifi_ap_record_t& ap_record)
         {
 
-            // char mac_cstr[12 + 5 + 1]{'\0'};
-            // snprintf(mac_cstr, sizeof(mac_cstr), "%02x:%02x:%02x:%02x:%02x:%02x",
-            //          ap_info[i].bssid[0],
-            //          ap_info[i].bssid[1],
-            //          ap_info[i].bssid[2],
-            //          ap_info[i].bssid[3],
-            //          ap_info[i].bssid[4],
-            //          ap_info[i].bssid[5]);
+            wlan_scan_devices_t new_ap_device;
+            new_ap_device.device_mac = 0x00 | ((uint64_t)ap_record.bssid[0] << 40) | ((uint64_t)ap_record.bssid[1] << 32) | ((uint64_t)ap_record.bssid[2] << 24) | ((uint64_t)ap_record.bssid[3] << 16) | ((uint64_t)ap_record.bssid[4] << 8) | ap_record.bssid[5];
 
-            // ESP_LOGI("\x1b[34m", "%s -- %-33s %-23s RSSI %d CH: %02d FTM:%d/%d", mac_cstr, ap_info[i].ssid, wlan_auth_mode(ap_info[i].authmode), ap_info[i].rssi, ap_info[i].primary, ap_info[i].ftm_initiator, ap_info[i].ftm_responder);
-        
-            
-            wlan_device_list[i].associated_mac = 0;
-            wlan_device_list[i].device_mac = 0;
-            wlan_device_list[i].device_mac = ((uint64_t)ap_info[i].bssid[0] << 40) | ((uint64_t)ap_info[i].bssid[1] << 32) | ((uint64_t)ap_info[i].bssid[2] << 24) | ((uint64_t)ap_info[i].bssid[3] << 16) | ((uint64_t)ap_info[i].bssid[4] << 8) | ap_info[i].bssid[5];
-            wlan_device_list[i].associated_mac = 0;
-            wlan_device_list[i].rssi = ap_info[i].rssi;
-            wlan_device_list[i].isAP = true;
-            wlan_device_list[i].channel = ap_info[i].primary;
-            wlan_device_list[i].ssid = (char*)ap_info[i].ssid;  /* NOTE: uint8_t* to char* so no fuss */
-            wlan_device_list[i].scan_cycle_since_detect = 0;
+            if( 0x00 != new_ap_device.device_mac){
+                
+                new_ap_device.associated_mac = 0U;
+                new_ap_device.rssi = ap_record.rssi;
+                new_ap_device.isAP = true;
+                new_ap_device.channel = ap_record.primary;
+                new_ap_device.ssid = (char*)ap_record.ssid;
+                new_ap_device.scan_cycle_since_detect = 0U;
 
-            for(auto& access_point : Wlan::access_point_list){
+                for(auto& access_point : Wlan::access_point_list){
 
-                if(0 == strncmp((char*)ap_info[i].ssid, access_point.ssid, 30)){
-                    access_point.device_mac = wlan_device_list[i].device_mac;
-                    access_point.channel = wlan_device_list[i].channel;
-                    access_point.last_seen = 0;
+                    if(0 == strncmp((char*)ap_record.ssid, access_point.ssid, 30)){
+                        access_point.device_mac = new_ap_device.device_mac;
+                        access_point.channel = new_ap_device.channel;
+                        access_point.last_seen = 0;
 
-                    ESP_LOGI("","AP is currently present: %s, mac: %llx, CH:%d", ap_info[i].ssid, access_point.device_mac, access_point.channel);
+                        ESP_LOGI("","AP is currently present: %s, mac: %llx, CH:%d", ap_record.ssid, access_point.device_mac, access_point.channel);
+                    }
                 }
-            }
-        }
 
+                /*new_ap_device.print_ap();*/
+                Wlan::collect_wifi_device(new_ap_device);
+            } 
+        });
 
+        // for (int i = 0; (i < 100/*maximum_number_of_APs*/); i++){
+        //     wlan_device_list[i].print_ap();
+        // }
+        
+        /* process the results of promiscous scan - to get the number of devices on the same channel, or neerby*/
+        calculate_nearby_dev_statistics(Wlan::statistics, Wlan::access_point_list[Wlan::associated_ap_index]);
 
         ESP_LOGI(NETWORK::Wlan::log_label_scan, "Scan has finished.");
         if(maximum_number_of_APs > num_of_active_ap_scanned){
@@ -765,14 +778,11 @@ esp_err_t Wlan::fastScan(void)
         else{
             ESP_LOGW(NETWORK::Wlan::log_label_scan, "number of APs is greater than %u, no more slots in memory!", num_of_active_ap_scanned);
         }
-        /* process the results of promiscous scan - to get the number of devices on the same channel, or neerby*/
-
-        calculate_nearby_dev_statistics(statistics, Wlan::access_point_list[Wlan::associated_ap_index]);
-
-        ESP_LOGI(NETWORK::Wlan::log_label_scan, "number of devices connected via this AP: %3d", statistics.num_of_sta_connected_to_ap);
-        ESP_LOGI(NETWORK::Wlan::log_label_scan, "number of devices on CH%2d: STA: %3d, AP: %3d", statistics.channel, statistics.num_of_ap_current_channel, statistics.num_of_sta_current_channel);
-        ESP_LOGI(NETWORK::Wlan::log_label_scan, "number of devices near me: STA: %3d, AP: %3d", statistics.num_of_sta, statistics.num_of_ap);
-        ESP_LOGI(NETWORK::Wlan::log_label_scan, "number of espressif devices: %3d", statistics.num_of_espressif_devices);
+        
+        ESP_LOGI(NETWORK::Wlan::log_label_scan, "number of devices connected via this AP: %3d", Wlan::statistics.num_of_sta_connected_to_ap);
+        ESP_LOGI(NETWORK::Wlan::log_label_scan, "number of devices on CH%2d: STA: %3d, AP: %3d", statistics.channel, Wlan::statistics.num_of_sta_current_channel, statistics.num_of_ap_current_channel);
+        ESP_LOGI(NETWORK::Wlan::log_label_scan, "number of devices near me: STA: %3d, AP: %3d", statistics.num_of_sta, Wlan::statistics.num_of_ap);
+        ESP_LOGI(NETWORK::Wlan::log_label_scan, "number of espressif devices: %3d", Wlan::statistics.num_of_espressif_devices);
         print_collected_device();
         
     }
@@ -796,7 +806,7 @@ void task_manageWlanConnection(void *parameters){
         ESP_LOGI(NETWORK::Wlan::log_label, "wifi iface manage start");
         wlan_interface.loadMACAddress();
 
-        wlan_interface.statistics.connection_ok_sec = 0;
+        /*wlan_interface.statistics.connection_ok_sec = 0;*/
         wlan_interface.wifi_trying_to_connect = 0;
         wlan_interface.begin();
 
@@ -804,7 +814,7 @@ void task_manageWlanConnection(void *parameters){
             
             if(Wlan::tWlanState::wlanState_rdyToConnect > wlan_interface.get_wlan_state()){
 
-               wlan_interface.statistics.connection_ok_sec = 0;
+               /*wlan_interface.statistics.connection_ok_sec = 0;*/
                wlan_interface.wifi_trying_to_connect = 0;
                wlan_interface.begin();
             } 
@@ -812,8 +822,7 @@ void task_manageWlanConnection(void *parameters){
                 wlan_interface.statistics.connection_ok_sec += WIFI_CONNECTION_CHECK_DELAY_SEC;
                 wlan_interface.wifi_trying_to_connect = 0;
 
-                ESP_LOGI(NETWORK::Wlan::log_label, "connected for: %ld", wlan_interface.statistics.connection_ok_sec);
-                
+                /*ESP_LOGI(NETWORK::Wlan::log_label, "connected for: %ld", wlan_interface.statistics.connection_ok_sec);*/
             }
             else{
                 /* trying to connect, but still not connected */

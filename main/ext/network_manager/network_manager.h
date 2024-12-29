@@ -70,11 +70,6 @@ namespace NETWORK
 
             static constexpr char* network_sensor_template = "\"w_rssi\":%.2f,\"w_dest\":%.2f,\"w_con_tm\":%.2f,\"w_recon\":%d,\"w_condev\":%d,\"w_alldev\":%d,\"w_chdev\":%d,\"w_apssid\":\"%s\"";
 
-            constexpr static const char* wlanSSID{"TS-uG65"};/*{"adsl sandor"}*//*;*/
-            constexpr static const char* wlanPassword{"4XfuPgEx"}/*{"floriflori"}*//**/;
-            //constexpr static const char* wlanSSID{"adsl sandor"};
-            //constexpr static const char* wlanPassword{"floriflori"};
-
         private:
             char macAddressCStr[12+1]{};
             static tWlanState _wlanIfaceState;
@@ -115,7 +110,8 @@ namespace NETWORK
                 uint8_t channel;
                 bool isAP;
                 float rssi;
-                char* ssid; /* This is a bad idea */
+               /*char* ssid; *//* This is a bad idea */
+                std::string ssid;
                 uint16_t scan_cycle_since_detect;
 
                 void print_dev_collected(void){
@@ -164,7 +160,7 @@ namespace NETWORK
                     rssi,
                     estimate_ap_dist_from_rssi(rssi),
                     (scan_cycle_since_detect * wlan_scan_period_sec),
-                    ssid
+                    ssid.c_str()
                     );
                 }
 
@@ -245,7 +241,7 @@ namespace NETWORK
             static uint64_t esp_my_mac;
             
 
-            wlan_manager_stats_t statistics;
+            RTC_FAST_ATTR static wlan_manager_stats_t statistics;
 
             uint16_t scan_period_counter = 0;
 
@@ -315,12 +311,12 @@ namespace NETWORK
                 int16_t res = snprintf(text_buffer, text_buffer_size, network_sensor_template,
                                        (float)statistics.rssi,                                  /* w_rssi */
                                        ap_dist_estimated,  
-                                       (float)(statistics.connection_ok_sec* 1.0/60.0),     /* w_con_tm */
+                                       (float)(statistics.connection_ok_sec* 1.0/3600.0),     /* w_con_tm */
                                        (int16_t)(statistics.num_of_reconnect),                                                                                                /* w_recon */
                                        (int16_t)(statistics.num_of_sta_connected_to_ap),                                                            /* w_condev */
                                        (int16_t)(statistics.num_of_ap + statistics.num_of_sta),                                                     /* w_alldev */
                                        (int16_t)(statistics.num_of_ap_current_channel + statistics.num_of_sta_current_channel),                     /* w_chdev */
-                                       wlanSSID
+                                       Wlan::access_point_list[Wlan::associated_ap_index].ssid
                                        );
                 if ((res < 0) || (res >= text_buffer_size))
                 {

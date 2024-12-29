@@ -5,7 +5,8 @@
 #include <esp_sleep.h>
 
 RTC_FAST_ATTR uint64_t nv_mcu_sleep_sec;
-RTC_FAST_ATTR time_t nv_last_deep_sleep_start_unix;
+RTC_FAST_ATTR uint64_t nv_mcu_awake_sec;
+RTC_FAST_ATTR time_t nv_last_deep_sleep_entered_exited_at_unix;
 
 class Sleep_manager{
 
@@ -39,14 +40,24 @@ class Sleep_manager{
         time_t mcu_time_now_unix = 0;
         esp_err_t time_status = Ntp_time::get_esp_rtc_time(mcu_time_now_unix);
 
-        if(0 != nv_last_deep_sleep_start_unix && (ESP_ERR_INVALID_STATE != time_status) && (ESP_FAIL != time_status)){
-            nv_mcu_sleep_sec += (mcu_time_now_unix - nv_last_deep_sleep_start_unix);
-            ESP_LOGW("RTC", " woke up after: %lld seconds of sleep", nv_mcu_sleep_sec);
+        if((ESP_ERR_INVALID_STATE != time_status) && (ESP_FAIL != time_status)){
 
-            nv_last_deep_sleep_start_unix = 0;
+            if(0 != nv_last_deep_sleep_entered_exited_at_unix){
+                ESP_LOGW("NIGHTMAN", "woke up after: %lld seconds of deep sleep, setting current time as wake time", (mcu_time_now_unix - nv_last_deep_sleep_entered_exited_at_unix));
+            
+                nv_mcu_sleep_sec += (mcu_time_now_unix - nv_last_deep_sleep_entered_exited_at_unix);
+                nv_last_deep_sleep_entered_exited_at_unix = mcu_time_now_unix;
+            }
+            else{
+
+                ESP_LOGW("NIGHTMAN", "woke up after: [unknown] seconds of deep sleep, setting current time as wake time");
+                nv_last_deep_sleep_entered_exited_at_unix = mcu_time_now_unix;
+            }
+            
         }
         else{
-            ESP_LOGW("RTC", "FAIL:woke up after: %lld seconds of sleep", nv_mcu_sleep_sec);
+            ESP_LOGW("NIGHTMAN", "woke up after [unknown] seconds of deep sleep");
+            nv_last_deep_sleep_entered_exited_at_unix = 0;
         }
 
         
@@ -66,11 +77,32 @@ class Sleep_manager{
     void enter_deep_sleep(void) { 
 
         /* TODO: Disconnect wifi*/
+        wlan_interface.disconnect_power_off();
+        
         /* TODO: check wakeup sources are enabled correctly*/
         /* TODO: check that sleep is scheduled for longer time than minimum */
-        esp_err_t time_status = Ntp_time::get_esp_rtc_time(nv_last_deep_sleep_start_unix);
-        if(time_status != ESP_OK){
+        time_t mcu_time_now_unix = 0;
+        esp_err_t time_status = Ntp_time::get_esp_rtc_time(mcu_time_now_unix);
+
+        if ((ESP_ERR_INVALID_STATE != time_status) && (ESP_FAIL != time_status))
+        {
+            
+
+            if(0 != nv_last_deep_sleep_entered_exited_at_unix){
+                ESP_LOGW("NIGHTMAN", "MCU was awake for: %lld seconds, now setting unix deep sleep started at to current time.", (mcu_time_now_unix - nv_last_deep_sleep_entered_exited_at_unix));
+                nv_mcu_awake_sec += (mcu_time_now_unix - nv_last_deep_sleep_entered_exited_at_unix);
+                nv_last_deep_sleep_entered_exited_at_unix = mcu_time_now_unix;
+            }
+            else{
+                ESP_LOGW("NIGHTMAN", "MCU was awake for: [unknown] seconds, now setting unix deep sleep started at to current time.");
+                nv_last_deep_sleep_entered_exited_at_unix = mcu_time_now_unix;
+            }
+            
+        }
+        else
+        {
             ESP_LOGW("NIGHTMAN", "could't get valid time before deep sleep start!");
+            nv_last_deep_sleep_entered_exited_at_unix = 0;
         }
 
         ESP_LOGW("NIGHTMAN", "**** **** **** **** **** **** **** ****");

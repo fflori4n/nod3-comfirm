@@ -19,7 +19,7 @@ class MCUInfo{
             {ESP_RST_INT_WDT, "ISR_WDT"},
             {ESP_RST_TASK_WDT, "TASK_WDT"},
             {ESP_RST_WDT, "WDT"},
-            {ESP_RST_DEEPSLEEP, "DEEP_SLEEP_EXITED"},
+            {ESP_RST_DEEPSLEEP, "WOKE_FR_DEEP_SLEEP"},
             {ESP_RST_BROWNOUT, "BROWN_OUT"},
             {ESP_RST_SDIO, "SDIO"},
             {ESP_RST_USB, "USB"},
@@ -163,17 +163,22 @@ class MCUInfo{
         return (abs(((int16_t)(value * 100)) % 100));
     }
 
+
+/*RTC_FAST_ATTR uint64_t nv_mcu_sleep_sec;
+RTC_FAST_ATTR uint64_t nv_mcu_awake_sec;*/
     esp_err_t get_service_data(char *text_buffer, int16_t text_buffer_size)
     {
 
-        static constexpr char *mcu_info_sensor_template = "\"mcu_upt\":%.2f, \"mcu_temp\":%.2f, \"mcu_rst\":\"%s\"";
+        static constexpr char *mcu_info_sensor_template = "\"mcu_tmreset\":%.2f, \"mcu_temp\":%.2f, \"mcu_rst\":\"%s\", \"mcu_awaketm\":%.2f, \"mcu_sleeptm\":%.2f";
 
-        float uptime_hours = (nv_mcu_uptime_sec/3600.0);
+        float uptime_hours = (nv_mcu_uptime_sec/60.0);
+        ESP_LOGI("up time", "%.2f", uptime_hours);
         int16_t res = snprintf(text_buffer, text_buffer_size, mcu_info_sensor_template,
-                               (float)(uptime_hours),
+                               (float)((nv_mcu_sleep_sec + nv_mcu_awake_sec)/3600.0),
                                (float)(chip_internal_temp_degc),
-                               reset_reason_to_string(esp_reset_reason())
-                              /* wake_reason_to_string(esp_sleep_get_wakeup_cause())*/
+                               reset_reason_to_string(esp_reset_reason()),
+                               (float)(nv_mcu_awake_sec/3600.0),
+                               (float)(nv_mcu_sleep_sec/3600.0)
                                );
 
         if ((res < 0) || (res >= text_buffer_size))
