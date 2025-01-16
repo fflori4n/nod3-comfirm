@@ -318,4 +318,5 @@ class ADC_input{
         }
         return ESP_OK;
     }
+
 };

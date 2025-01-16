@@ -561,9 +561,9 @@ void Wlan::wlan_promiscuous_handler(void *buff, wifi_promiscuous_pkt_type_t type
     /*if ((type != WIFI_PKT_DATA) && (type != WIFI_PKT_MGMT))
         return;*/
 
-    /*if(type != WIFI_PKT_DATA){
+    if(type != WIFI_PKT_DATA){
         return;
-    }*/
+    }
 
     const wifi_promiscuous_pkt_t *ppkt = (wifi_promiscuous_pkt_t *)buff;
     const wifi_ieee80211_packet_t *ipkt = (wifi_ieee80211_packet_t *)ppkt->payload;

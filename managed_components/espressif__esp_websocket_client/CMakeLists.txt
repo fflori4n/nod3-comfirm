@@ -11,11 +11,11 @@ endif()
 if(${IDF_TARGET} STREQUAL "linux")
 	idf_component_register(SRCS "esp_websocket_client.c"
                     INCLUDE_DIRS "include"
-                    REQUIRES esp-tls tcp_transport http_parser esp_event nvs_flash esp_stubs json
+                    REQUIRES esp-tls tcp_transport http_parser esp_event nvs_flash esp_stubs json driver
                     PRIV_REQUIRES esp_timer)
 else()
     idf_component_register(SRCS "esp_websocket_client.c"
                     INCLUDE_DIRS "include"
-                    REQUIRES lwip esp-tls tcp_transport http_parser esp_event
+                    REQUIRES lwip esp-tls tcp_transport http_parser esp_event driver
                     PRIV_REQUIRES esp_timer)
 endif()

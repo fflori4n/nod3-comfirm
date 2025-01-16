@@ -11,7 +11,11 @@
                 "${config:idf.espIdfPath}/components/**",
                 "${config:idf.espIdfPathWin}/components/**",
                 "${workspaceFolder}/**",
-                "/home/ffsk/esp/esp-idf/components/log/include"
+                "/home/ffsk/esp/esp-idf/components/log/include",
+                "/home/ffsk/esp/esp-idf/components/esp_driver_rmt/include",
+                "/home/ffsk/esp/esp-idf/components/esp_adc/include/esp_adc",
+                "/home/ffsk/esp/esp-idf/components/newlib/platform_include",
+                "/home/ffsk/esp/esp-idf/components"
             ],
             "browse": {
                 "path": [

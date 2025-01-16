@@ -96,6 +96,9 @@
         "__bit_reference": "cpp",
         "__hash_table": "cpp",
         "__split_buffer": "cpp",
-        "filesystem": "cpp"
+        "filesystem": "cpp",
+        "__locale": "cpp",
+        "shared_mutex": "cpp",
+        "__mutex_base": "cpp"
     }
 }

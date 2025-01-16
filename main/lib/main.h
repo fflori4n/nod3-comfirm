@@ -16,11 +16,16 @@
 #include "esp_timer.h"
 #include "esp_event.h"
 #include "esp_websocket_client.h"
+#include "esp_adc/adc_continuous.h"
+#include "esp_adc/adc_cali_scheme.h"
 /*#include "esp_websocket_client.h"*/
 #include "driver/temperature_sensor.h"
 
 /*#include "esp_adc_cal.h"*/
 #include "driver/gpio.h"
+#include "driver/adc.h"
+
+#include "esp_adc_cal.h"  // Might be needed for internal ADC calibration types
 #include "driver/adc.h"
 
 #include <driver/i2c.h>
@@ -32,9 +37,12 @@
 
 #include "bmx280/bmx280.c"
 #include "analogue_in/analogue_in.cpp"
+#include "adc_periodic/adc_periodic.cpp"
 #include "ha_websocket/ha_websocket.cpp"
 #include "sleep_manager/sleep_manager.cpp"
 #include "mcu_info/mcu_info.cpp"
+#include "led_ws2812b/led_ws2812b.h"
+
 
 
 class Main final{
@@ -91,12 +99,12 @@ class bmx280_sensor{
         float filtered_pressure{0xFFFF};
         float filtered_humidity{0xFFFF};
 
-        float sensor_calibration_offset;
+        float sensor_calibration_offset = 0.0;
         float masl_pressure_mbar = 0;
 
 
 
-    esp_err_t begin(i2c_port_t i2c_port, const char* sensor_prefix, float sensor_calibration_offset = 0){
+    esp_err_t begin(i2c_port_t i2c_port, const char* sensor_prefix, float sensor_calibration_offset){
 
         esp_err_t res = ESP_OK;
 
@@ -130,7 +138,9 @@ class bmx280_sensor{
             res = ESP_FAIL;
         }
 
-        masl_pressure_mbar = ((pressure * masl_pressure_compensation_factor) / 100.0) + sensor_calibration_offset;
+        masl_pressure_mbar = ((float)(pressure * masl_pressure_compensation_factor) / 100.0) + 18.0;
+
+        ESP_LOGI("bme280","pressure %f, masl correction %f, offset %f", pressure/100.0, ((pressure * masl_pressure_compensation_factor) / 100.0), masl_pressure_mbar);
 
         ESP_LOGI("bme290","slave addr:%x",bmx280_sens_pointer->slave);
         ESP_LOGI("bme290","chip:%x",bmx280_sens_pointer->chip_id);
