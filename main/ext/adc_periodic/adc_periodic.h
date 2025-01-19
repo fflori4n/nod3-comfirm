@@ -3,36 +3,32 @@
 /*#include "freertos/ringbuf.h"*/
 #include "../adc_continuous_internal.h" /* NOTE: shame on me, this crap took waaaay too long to figure out*/
 
+
 class ADC_continous{
 
     /* NOTE: will hardcode values for ADC_1, probably not worth it to make it flexible as there are many differences between ADC1 and ADC2 */
     /* ESP boards are notorious for ADC stuff that makes no sense at all e.g. Wi-Fi or check ADC status to see if ADC actually working and try again if not...*/
-
     private:
-
-        constexpr static adc_unit_t adc_selected_unit{ADC_UNIT_1};
-        constexpr static adc_digi_convert_mode_t adc_selected_conversion_mode{ADC_CONV_SINGLE_UNIT_1};  /* use only ADC1 */
-        constexpr static adc_atten_t adc_selected_attenuation{ADC_ATTEN_DB_11}; /* 0V - 2V5 NOTE: Can be set on a per channel basis, but I paid for the whole ADC, will use the whole ADC */
-        constexpr static uint32_t adc_selected_bit_width{12};
-
-        constexpr static uint8_t adc_numof_active_channels{2};
-        static adc_channel_t adc_channels[adc_numof_active_channels];
-
-        constexpr static uint32_t continous_conversion_buffer_size{SOC_ADC_DIGI_DATA_BYTES_PER_CONV * adc_numof_active_channels};
-        constexpr static uint32_t continous_result_pool_size{SOC_ADC_DIGI_DATA_BYTES_PER_CONV * 5};
-
     public:
+    /* TYPEDEFS: */
 
-        const char* module_tag{"ADC_CONTINOUS"};
+    typedef enum adc_input_type_t{
+            ADC_CHANNEL_DISABLED = 0,
+            ADC_CHANNEL_AC_50Hz  = 1,
+            ADC_CHANNEL_DC = 2
+        } adc_input_type_t;
 
-        typedef struct adc_continous_reading_t{
+    typedef struct adc_continous_reading_t{
+
+
+            adc_input_type_t channel_type = ADC_CHANNEL_DISABLED;
 
             uint64_t measurement_accumlator;
             uint16_t num_of_adc_multisamples;
             uint16_t num_of_samples;
             uint16_t num_of_samples_in_measurement;
 
-            uint16_t new_measurement;
+            uint16_t new_sample;
 
             int64_t prev_measurement_end_timestamp_ms; /* uses esp_timer_get_time(), microseconds from esp boot or deep sleep exit, see: https://github.com/espressif/esp-idf/issues/9615 */
             int64_t measurement_period_duration;
@@ -58,43 +54,23 @@ class ADC_continous{
 
             void print(void){
 
-                ESP_LOGI("","measurement_accumlator: %lld, num of measurements: %d, new_measuremnet %d", measurement_accumlator, num_of_adc_multisamples, new_measurement);
+                ESP_LOGI("","measurement_accumlator: %lld, num of measurements: %d, new_measuremnet %d", measurement_accumlator, num_of_adc_multisamples, new_sample);
 
             }
 
         }adc_continous_reading_t;
 
-        static constexpr uint8_t adc_number_of_channels{5}; /* ADC1 on ESP C3 can sample 5 channels using MUX, numbers are: | 0 | 1 | 2 | 3 | 4 |*/
-        static volatile adc_continous_reading_t adc_measurements[adc_number_of_channels]; /* will static allocate memory for every possible channel even if only a few are used. to keep it simple*/
+    private:
 
-        /* set speed of adc sampling TODO: add bound checks*/
-        /* probably #define SOC_ADC_SAMPLE_FREQ_THRES_HIGH          (2*1000*1000)
-#define SOC_ADC_SAMPLE_FREQ_THRES_LOW           (20*1000*/
-        /* SOC_ADC_SAMPLE_FREQ_THRES_LOW and SOC_ADC_SAMPLE_FREQ_THRES_HIGH */
-        /* 120 6 */
-        /* 120 7 */
-        static constexpr uint16_t adc_sampling_period_us{120};
-        static constexpr uint8_t adc_multisample_num{6};
-        static constexpr uint32_t adc_continous_sampling_frequency{(uint32_t)((1000 * 1000 * 1.0)/(adc_sampling_period_us/adc_multisample_num))};
-        static constexpr uint16_t measurement_period_ms{4000}; /* will calculate values like frequenct, rms and so on,approx. every measuremnet period ms, this will be later corrected by actual time*/
-        static constexpr uint16_t measurement_period_ticks{(measurement_period_ms * 1000)/ (adc_numof_active_channels * adc_sampling_period_us * adc_multisample_num)};
+    public:
 
-        static constexpr float filt_param_2ms{((float)adc_sampling_period_us / 1000.0f)/(2.0f*1000.0f)};
-        static constexpr float filt_param_200ms{((float)adc_sampling_period_us / 1000.0f)/(20.0f*1000.0f)};
+        constexpr static uint8_t ADC1_NUM_OF_CHANNELS{5};  /* for bounds checks */
 
-        //static constexpr float filt_param_2ms{1/(2*1000/280)};
-        //static constexpr float filt_param_200ms{1/(200*1000/280)};
-
-        static constexpr float filt_param_measurement_period{1.0f / (2000*1000/20000.0f)}; /* expected 20 ms for one period*/
-
-        static constexpr float nominal_grid_frequency    {50.0F};
-        static constexpr float nominal_grid_voltage      {230.0F};
-        static constexpr float one_over_sqrt_two         {1.0/1.41};
-        static constexpr float adc_to_voltage_v          {2.5/4096};
-        static constexpr float burden_resistor_r         {240};
-        static constexpr float linear_offset_calibration_point {177.0/151};    /* measured_mA : esp_sensor_mA */
+        /* ADC continous ESP_IDF specific variables */
 
         static adc_continuous_ctx_t* adc_continous_driver_handle;
+        adc_continuous_evt_cbs_t adc_continous_callback_config;
+        adc_digi_pattern_config_t adc_pattern[SOC_ADC_PATT_LEN_MAX];
 
         adc_continuous_handle_cfg_t adc_continous_handle_config = {
             .max_store_buf_size = continous_result_pool_size,
@@ -110,15 +86,57 @@ class ADC_continous{
             .format = ADC_DIGI_OUTPUT_FORMAT_TYPE1,
         };
 
-        adc_continuous_evt_cbs_t adc_continous_callback_config;
-        adc_digi_pattern_config_t adc_pattern[SOC_ADC_PATT_LEN_MAX];
+        const char* module_tag{"ADC_CONTINOUS"};
 
-        static volatile uint64_t adc1_ch4_measurement_accumlator;
-        static volatile uint16_t adc1_ch4_num_of_measurements;
+        /* set up measurement format and ADC unit */
+        constexpr static adc_unit_t adc_selected_unit{ADC_UNIT_1};
+        constexpr static adc_digi_convert_mode_t adc_selected_conversion_mode{ADC_CONV_SINGLE_UNIT_1};//ADC_CONV_SINGLE_UNIT_1};  /* use only ADC1 */
+        constexpr static adc_atten_t adc_selected_attenuation{ADC_ATTEN_DB_11}; /* 0V - 2V5 NOTE: Can be set on a per channel basis, but I paid for the whole ADC, will use the whole ADC */
+        constexpr static uint32_t adc_selected_bit_width{12};
 
-        static volatile uint16_t adc_new_raw_measurement;
+        /* set up list of GPIOs to sample */
+        constexpr static adc_channel_t adc_active_channels[2]{ ADC_CHANNEL_0, ADC_CHANNEL_4 };
+        constexpr static uint8_t adc_numof_active_channels{sizeof(adc_active_channels)/sizeof(adc_active_channels[0])};
 
+        /* DMA related settings */
 
+        /* NOTE: give at least x4 for continous conversion buff, to increase the period between callbacks, if sampling freq is high callbacks could be called back to back and cause all kinds of missed events */
+        constexpr static uint32_t continous_conversion_buffer_size{SOC_ADC_DIGI_DATA_BYTES_PER_CONV * adc_numof_active_channels * 4 };   /* uint_32 * number of channels * number of measurements*/
+        /* NOTE: don't care will not use the CB for it. Can be same size as conv buff*/
+        constexpr static uint32_t continous_result_pool_size{continous_conversion_buffer_size};
+        static volatile size_t size_to_memcopy;
+        static volatile adc_digi_output_data_t adc_continous_sample_buffer[continous_result_pool_size];  /* this is a buffer used to temporarily copy the data from ringBuff when the callback happens*/
+
+        static constexpr uint8_t adc_number_of_channels{ADC1_NUM_OF_CHANNELS}; /* ADC1 on ESP C3 can sample 5 channels using MUX, numbers are: | 0 | 1 | 2 | 3 | 4 |*/
+        static volatile adc_continous_reading_t adc_measurements[adc_number_of_channels]; /* will static allocate memory for every possible channel even if only a few are used. to keep it simple*/
+
+        /* set speed of adc sampling TODO: add bound checks*/
+        /* probably #define SOC_ADC_SAMPLE_FREQ_THRES_HIGH          (2*1000*1000)
+#define SOC_ADC_SAMPLE_FREQ_THRES_LOW           (20*1000*/
+        /* SOC_ADC_SAMPLE_FREQ_THRES_LOW and SOC_ADC_SAMPLE_FREQ_THRES_HIGH */
+        /* 120 6 */
+        /* 120 7 */
+
+        /* 160 ok for 2 channel */
+        /* 180 - 3*/
+        /* 160 - 4*/
+        /* 250 4 */
+        static constexpr uint16_t adc_sampling_period_us{120};
+        static constexpr uint8_t adc_multisample_num{6};
+        static constexpr uint32_t adc_continous_sampling_frequency{(uint32_t)((1000 * 1000 * 1.0)/(adc_sampling_period_us/adc_multisample_num))};
+        static constexpr uint16_t measurement_period_ms{1000}; /* will calculate values like frequenct, rms and so on,approx. every measuremnet period ms, this will be later corrected by actual time*/
+        static constexpr uint16_t measurement_period_ticks{(measurement_period_ms * 1000)/ (adc_numof_active_channels * adc_sampling_period_us * adc_multisample_num)};
+
+        static constexpr float filt_param_2ms{((float)96.0 / 1000.0f)/(2.0f)};        /* 1/10 of a full period */ 
+        static constexpr float filt_param_200ms{((float)96.0 / 1000.0f)/(200.0f)};    /* 10 full periods */ 
+        static constexpr float filt_param_measurement_period{1.0f / (2000*1000/20000.0f)}; 
+
+        static constexpr float nominal_grid_frequency    {50.0F};
+        static constexpr float nominal_grid_voltage      {230.0F};
+        static constexpr float one_over_sqrt_two         {1.0/1.41};
+        static constexpr float adc_to_voltage_v          {2.5/4096};
+        static constexpr float burden_resistor_r         {240};
+        static constexpr float linear_offset_calibration_point {177.0/151};    /* measured_mA : esp_sensor_mA */
 
     private:
         
@@ -148,6 +166,8 @@ class ADC_continous{
 
         static bool IRAM_ATTR adc_conversion_rdy_cb(adc_continuous_handle_t handle, const adc_continuous_evt_data_t *edata, void *user_data)
         {
+            UBaseType_t uxSavedInterruptStatus;
+            uxSavedInterruptStatus = taskENTER_CRITICAL_FROM_ISR();
 
             constexpr uint16_t lock_attempt_timeout_ms{10};
             constexpr uint16_t islocked_poll_ms{1};
@@ -161,69 +181,49 @@ class ADC_continous{
             if (conversion_done_cb.owns_lock())
             {
 
-                adc_digi_output_data_t measurements[5];
-            TickType_t ticks_to_wait;
+               // adc_digi_output_data_t measurements[5];
+            /*TickType_t ticks_to_wait;*/
             size_t size = 0;
+            uint64_t time_of_sample = esp_timer_get_time();
+            
 
-            UBaseType_t uxSavedInterruptStatus;
-
-    /* Enter the critical section. In this example, this function is itself called from
-       within a critical section, so entering this critical section will result in a nesting
-       depth of 2. Save the value returned by taskENTER_CRITICAL_FROM_ISR() into a local
-       stack variable so it can be passed into taskEXIT_CRITICAL_FROM_ISR(). */
-    uxSavedInterruptStatus = taskENTER_CRITICAL_FROM_ISR();
-
-    /* Perform the action that is being protected by the critical section here. */
-
-    /* Exit the critical section. In this example, this function is itself called from a
-       critical section, so interrupts will have already been disabled before a value was
-       stored in uxSavedInterruptStatus, and therefore passing uxSavedInterruptStatus into
-       taskEXIT_CRITICAL_FROM_ISR() will not result in interrupts being re-enabled. */
-
-       //void *data = xRingbufferReceiveUpToFromISR(handle->ringbuf_hdl, &size, 5); /* @TODO: calculate max time dinamically based on adc sampling freq.*/
-            void *data = xRingbufferReceiveUpTo(handle->ringbuf_hdl, &size, (1000/portTICK_PERIOD_MS), 5);
-            memcpy(measurements, data, size);
-            //vRingbufferReturnItemFromISR(handle->ringbuf_hdl, data, nullptr);
-            vRingbufferReturnItem(handle->ringbuf_hdl, data);
+            void *data = xRingbufferReceiveUpToFromISR(handle->ringbuf_hdl, &size, (continous_conversion_buffer_size/SOC_ADC_DIGI_DATA_BYTES_PER_CONV)); /* @TODO: calculate max time dinamically based on adc sampling freq.*/
+            //void *data = xRingbufferReceiveUpTo(handle->ringbuf_hdl, &size, (100000/portTICK_PERIOD_MS), 5);
+            memcpy((void*)adc_continous_sample_buffer, data, size);
+            vRingbufferReturnItemFromISR(handle->ringbuf_hdl, data, nullptr);
+            //vRingbufferReturnItem(handle->ringbuf_hdl, data);
 
             //memcpy(&measurement, edata->conv_frame_buffer, size);
 
-    taskEXIT_CRITICAL_FROM_ISR( uxSavedInterruptStatus );
-
-
-
-            
-
-             for (uint8_t i = 0; i < 5; i++)
+             for (uint8_t i = 0; i < (size/SOC_ADC_DIGI_DATA_BYTES_PER_CONV); i++)
              {
 
-                if ((measurements[0].type2.channel) > ADC_continous::adc_number_of_channels)
+                /* if channel is not managed, skip to next. */
+                if ((adc_continous_sample_buffer[i].type2.channel) > ADC_continous::adc_number_of_channels)
                 {
-                    return false;
+                    continue;
                 }
 
-                volatile adc_continous_reading_t &adc_ch = adc_measurements[(measurements[0].type2.channel)];
+                volatile adc_continous_reading_t &adc_ch = adc_measurements[(adc_continous_sample_buffer[i].type2.channel)];
 
-                if (adc_ch.num_of_adc_multisamples < adc_multisample_num)
-                { /* take ADC reading for multisampling */
+                /* take sample, add it to accumlator - to get multisampled ADC channel */
+                adc_ch.measurement_accumlator += (adc_continous_sample_buffer[i].type2.data); /* TODO: *8 should be also ok.*/
+                adc_ch.num_of_adc_multisamples++;
 
-                    adc_ch.measurement_accumlator += (measurements[0].type2.data * 10); /* TODO: *8 should be also ok.*/
-                    adc_ch.num_of_adc_multisamples++;
-                }
-                else /* process new ADC measurement */
+                /* ADC was multisampled, time to take new sample point */
+                if (adc_ch.num_of_adc_multisamples >= adc_multisample_num)
                 {
 
-                    adc_ch.new_measurement = adc_ch.measurement_accumlator / adc_ch.num_of_adc_multisamples;
+                    adc_ch.new_sample = (adc_ch.measurement_accumlator /** 10.0f*/ / adc_ch.num_of_adc_multisamples);
+                    adc_ch.num_of_samples++;
                     adc_ch.measurement_accumlator = 0;
                     adc_ch.num_of_adc_multisamples = 0;
-                    adc_ch.num_of_samples++;
 
                     /* use new measurement to calculate DC baseline filter */
-                    adc_ch.filtered_dc_base += 0.1 * (adc_ch.pos_variance_approx - adc_ch.neg_variance_approx);
-                    adc_ch.filtered_dc_base = ADC_continous::weighted_exp_filter(adc_ch.new_measurement, adc_ch.filtered_dc_base, filt_param_200ms, 0.0f);
+                    /*adc_ch.filtered_dc_base += 0.1 * (adc_ch.pos_variance_approx - adc_ch.neg_variance_approx);*/ /* NOTE: offset the centerline to get good zero cross tresholds, should not change RMS*/
+                    adc_ch.filtered_dc_base = ADC_continous::weighted_exp_filter(adc_ch.new_sample, adc_ch.filtered_dc_base, filt_param_200ms, 0.0f);
 
-                    //adc_ch.filtered_fast_filter += (adc_ch.pos_variance_approx - adc_ch.neg_variance_approx);
-                    adc_ch.filtered_fast_filter = ADC_continous::weighted_exp_filter_w_regress(adc_ch.new_measurement, adc_ch.filtered_fast_filter, filt_param_2ms, 0.0f);
+                    adc_ch.filtered_fast_filter = ADC_continous::weighted_exp_filter_w_regress(adc_ch.new_sample, adc_ch.filtered_fast_filter, filt_param_2ms, 0.0f);
 
                     if (adc_ch.filtered_fast_filter > adc_ch.filtered_dc_base)
                     {
@@ -245,33 +245,36 @@ class ADC_continous{
                         }
                     }
                     
-                    if ((adc_ch.signal_half_period == 0) && (adc_ch.new_measurement > (adc_ch.filtered_fast_filter + (1.2 * adc_ch.pos_variance_approx / 2))))
+                    if ((adc_ch.signal_half_period == 0) && (adc_ch.new_sample > (adc_ch.filtered_dc_base + (/*1.2 **/ adc_ch.pos_variance_approx / 2))))
                     {
                         adc_ch.signal_half_period = 1;
                         adc_ch.signal_zero_cross++;
                     }
-                    else if ((adc_ch.signal_half_period == 1) && (adc_ch.new_measurement < (adc_ch.filtered_fast_filter - (1.2 * adc_ch.neg_variance_approx / 2))))
+                    else if ((adc_ch.signal_half_period == 1) && (adc_ch.new_sample < (adc_ch.filtered_dc_base - (/*1.2 **/ adc_ch.neg_variance_approx / 2))))
                     {
                         adc_ch.signal_half_period = 0;
                         adc_ch.signal_zero_cross++;
                     }
 
-                    adc_ch.rms_accumlator += abs((adc_ch.new_measurement - adc_ch.filtered_fast_filter) * (adc_ch.new_measurement - adc_ch.filtered_fast_filter));
+                    adc_ch.rms_accumlator += abs((adc_ch.new_sample - adc_ch.filtered_fast_filter) * (adc_ch.new_sample - adc_ch.filtered_fast_filter));
                     adc_ch.rms_samples++;
 
-                    if (adc_ch.rms_samples >= ADC_continous::measurement_period_ticks) /* set the 'approximate' measurement time, values will be corrected using esp_timer us timing after */
-                    {
+                    
 
-                        adc_ch.filtered_peak_to_peak = adc_ch.v_max - adc_ch.v_min;
-                        adc_ch.v_max = 0;
-                        adc_ch.v_min = 40960;
+                    if ((time_of_sample - (adc_ch.prev_measurement_end_timestamp_ms)) > (measurement_period_ms * 1000)) /* set the 'approximate' measurement time, values will be corrected using esp_timer us timing after */
+                    {
+                        adc_ch.measurement_period_duration = time_of_sample - adc_ch.prev_measurement_end_timestamp_ms;
+                        adc_ch.prev_measurement_end_timestamp_ms = time_of_sample;
 
                         adc_ch.num_of_samples_in_measurement = adc_ch.num_of_samples;
                         adc_ch.num_of_samples = 0;
 
+                        adc_ch.filtered_peak_to_peak = adc_ch.v_max - adc_ch.v_min;
 
-                        adc_ch.measurement_period_duration = esp_timer_get_time() - adc_ch.prev_measurement_end_timestamp_ms;
-                        adc_ch.rms_result = (1000000.0 / adc_ch.measurement_period_duration) * (float)adc_ch.rms_accumlator / (adc_ch.rms_samples * 10.0f * 10.0f);
+                        adc_ch.v_max = adc_ch.filtered_dc_base;
+                        adc_ch.v_min = adc_ch.filtered_dc_base;
+
+                        adc_ch.rms_result = (1000000.0 / adc_ch.measurement_period_duration) * (float)adc_ch.rms_accumlator / (adc_ch.rms_samples /* 10 * 10*/);
                         adc_ch.rms_accumlator = 0;
                         adc_ch.rms_samples = 0;
 
@@ -279,13 +282,12 @@ class ADC_continous{
                         adc_ch.signal_zero_cross = 0;
                         adc_ch.measurement_rdy = true;
 
-                        adc_ch.prev_measurement_end_timestamp_ms = esp_timer_get_time();
+                        
                     }
                 }
             }
             }
-
-            
+            taskEXIT_CRITICAL_FROM_ISR( uxSavedInterruptStatus );
 
             return true;
         }
@@ -303,13 +305,13 @@ class ADC_continous{
 
             adc_pattern[SOC_ADC_PATT_LEN_MAX] = {0};
 
-            adc_continous_config.pattern_num = sizeof(adc_channels) / sizeof(adc_channel_t);
+            adc_continous_config.pattern_num = sizeof(adc_active_channels) / sizeof(adc_channel_t);
 
             /* fill out the chabbel patterns with default config, all chanels will get the same config*/
-            for (int i = 0; i < (sizeof(adc_channels) / sizeof(adc_channel_t)); i++) {
+            for (int i = 0; i < (sizeof(adc_active_channels) / sizeof(adc_channel_t)); i++) {
 
                 adc_pattern[i].atten = adc_selected_attenuation;
-                adc_pattern[i].channel = adc_channels[i] & 0x7;
+                adc_pattern[i].channel = adc_active_channels[i] & 0x7;
                 adc_pattern[i].unit = adc_selected_unit;
                 adc_pattern[i].bit_width = adc_selected_bit_width;
 
@@ -324,7 +326,7 @@ class ADC_continous{
 
             adc_continous_callback_config = {
                 .on_conv_done = adc_conversion_rdy_cb,
-                .on_pool_ovf = adc_conversion_rdy_cb,
+                /*.on_pool_ovf = adc_conversion_rdy_cb,*/
             };
              
             ESP_ERROR_CHECK(adc_continuous_register_event_callbacks(adc_continous_driver_handle, &adc_continous_callback_config, NULL));
@@ -332,12 +334,36 @@ class ADC_continous{
 
             return ESP_OK;
         };
+
+        static esp_err_t process_ac_in_measurement(const bool wait_measurement_rdy = true, const uint16_t no_new_measurement_timeout_ms = 2000){
+
+            for (auto& adc_ch: adc_measurements) {
+
+                if((false == wait_measurement_rdy) || (true == adc_ch.measurement_rdy)){
+
+                    
+
+                    uint16_t adc_channel_index = &adc_ch - &adc_measurements[0]; /*ADC_continous::adc_channels[];*/
+                    ESP_LOGI("","ADC __ channel: %d", adc_channel_index);
+
+                    float measurement_cycle_duration_ms = (adc_ch.measurement_period_duration* 1.0)/1000;
+                    ESP_LOGI("","measurement duration: %0.2f, samples: %0.2f, sample period %0.2f",(ADC_continous::adc_measurements[4].measurement_period_duration* 1.0)/1000, (float)ADC_continous::adc_measurements[4].num_of_samples_in_measurement, ((ADC_continous::adc_measurements[4].measurement_period_duration* 1.0)/1000) / (float)ADC_continous::adc_measurements[4].num_of_samples_in_measurement);
+
+                    /* finally do not forget. */
+                    adc_ch.measurement_rdy = false; /* clear flag of new measurement. */
+                }
+
+            }
+
+            
+
+            return ESP_OK;
+        }
 };
 
-adc_channel_t ADC_continous::adc_channels[] = {ADC_CHANNEL_0, ADC_CHANNEL_4};
-volatile uint16_t ADC_continous::adc1_ch4_num_of_measurements = 0;
-volatile uint64_t ADC_continous::adc1_ch4_measurement_accumlator = 0;
-volatile uint16_t ADC_continous::adc_new_raw_measurement = 0;
+//adc_channel_t ADC_continous::adc_channels[] = {ADC_CHANNEL_0, ADC_CHANNEL_4};
+
+volatile adc_digi_output_data_t ADC_continous::adc_continous_sample_buffer[] = {};
 adc_continuous_ctx_t* ADC_continous::adc_continous_driver_handle = nullptr;
 volatile ADC_continous::adc_continous_reading_t ADC_continous::adc_measurements[] = {};
 std::mutex ADC_continous::adc_conversion_cb_mutex{};
@@ -350,25 +376,34 @@ void task_adc_continous_measurement(void *parameters){
     vTaskDelay(1000/portTICK_PERIOD_MS);
     coninous_adc_manager.init_and_start();
 
+    ADC_continous::adc_measurements[0].channel_type = ADC_continous::ADC_CHANNEL_DC;
+    ADC_continous::adc_measurements[4].channel_type = ADC_continous::ADC_CHANNEL_AC_50Hz;
+
     for(;;){
+
+        //ADC_continous::process_ac_in_measurement();
+        //vTaskDelay(50/portTICK_PERIOD_MS);
+
         if(ADC_continous::adc_measurements[4].measurement_rdy == true){
 
             ADC_continous::adc_measurements[4].measurement_rdy = false;
 
-            ESP_LOGI("","measurement duration: %0.2f, samples: %0.2f, sample period %0.2f",(ADC_continous::adc_measurements[4].measurement_period_duration* 1.0)/1000, (float)ADC_continous::adc_measurements[4].num_of_samples_in_measurement, ((ADC_continous::adc_measurements[4].measurement_period_duration* 1.0)/1000) / (float)ADC_continous::adc_measurements[4].num_of_samples_in_measurement);
-            ESP_LOGI("","adc1_ch0 new_measuremnet %d fast: %0.2f mean: %0.2f",ADC_continous::adc_measurements[0].new_measurement,ADC_continous::adc_measurements[0].filtered_fast_filter, ADC_continous::adc_measurements[0].filtered_dc_base);
-        ESP_LOGI("","adc1_ch4 new_measuremnet %d fast: %0.2f mean: %0.2f", ADC_continous::adc_measurements[4].new_measurement, ADC_continous::adc_measurements[4].filtered_fast_filter, ADC_continous::adc_measurements[4].filtered_dc_base);
-        ESP_LOGI("", "variance: - %0.2f : + %0.2f, dc base center: %0.2f ", ADC_continous::adc_measurements[4].neg_variance_approx, ADC_continous::adc_measurements[4].pos_variance_approx, ADC_continous::adc_measurements[4].pos_variance_approx - ADC_continous::adc_measurements[4].neg_variance_approx);
-        ESP_LOGI("", "vmin:%02.f vmax:%0.2f, p2p:%2.0f", ADC_continous::adc_measurements[4].v_max, ADC_continous::adc_measurements[4].v_min, (ADC_continous::adc_measurements[4].v_max - ADC_continous::adc_measurements[4].v_min));
+        //     ESP_LOGI("","measurement duration: %0.2f, samples: %0.2f, sample period %0.2f",;
+        //     ESP_LOGI("","adc1_ch0 new_measuremnet %d fast: %0.2f mean: %0.2f",ADC_continous::adc_measurements[0].new_sample,ADC_continous::adc_measurements[0].filtered_fast_filter, ADC_continous::adc_measurements[0].filtered_dc_base);
+        // ESP_LOGI("","adc1_ch4 new_measuremnet %d fast: %0.2f mean: %0.2f", ADC_continous::adc_measurements[4].new_sample, ADC_continous::adc_measurements[4].filtered_fast_filter, ADC_continous::adc_measurements[4].filtered_dc_base);
+        // ESP_LOGI("", "variance: - %0.2f : + %0.2f, dc base center: %0.2f ", ADC_continous::adc_measurements[4].neg_variance_approx, ADC_continous::adc_measurements[4].pos_variance_approx, ADC_continous::adc_measurements[4].pos_variance_approx - ADC_continous::adc_measurements[4].neg_variance_approx);
+        // ESP_LOGI("", "vmin:%02.f vmax:%0.2f, p2p:%2.0f", ADC_continous::adc_measurements[4].v_max, ADC_continous::adc_measurements[4].v_min, (ADC_continous::adc_measurements[4].v_max - ADC_continous::adc_measurements[4].v_min));
         
-        ESP_LOGI("", "rms accu:%02.f rms samples:%0.2f, rms:%2.0f", ADC_continous::adc_measurements[4].rms_accumlator, ADC_continous::adc_measurements[4].rms_samples, (ADC_continous::adc_measurements[4].rms_result));
-        ESP_LOGI("","peak_to_peak: %0.2f",ADC_continous::adc_measurements[4].filtered_peak_to_peak);
-        ESP_LOGI("","zero cross %d, freq %0.2f", ADC_continous::adc_measurements[4].signal_zero_cross, ADC_continous::adc_measurements[4].frequency);
+        // ESP_LOGI("", "rms accu:%02.f rms samples:%0.2f, rms:%2.0f", ADC_continous::adc_measurements[4].rms_accumlator, ADC_continous::adc_measurements[4].rms_samples, (ADC_continous::adc_measurements[4].rms_result));
+        // ESP_LOGI("","peak_to_peak: %0.2f",ADC_continous::adc_measurements[4].filtered_peak_to_peak);
+        // ESP_LOGI("","zero cross %d, freq %0.4f", ADC_continous::adc_measurements[4].signal_zero_cross, ADC_continous::adc_measurements[4].frequency);
        
-
-        }
-        //ESP_LOGI("","measurement duration: %0.2f, samples: %0.2f, sample period %0.2f",(ADC_continous::adc_measurements[4].measurement_period_duration* 1.0)/1000, (float)ADC_continous::adc_measurements[4].num_of_samples_in_measurement, ((ADC_continous::adc_measurements[4].measurement_period_duration* 1.0)/1000) / (float)ADC_continous::adc_measurements[4].num_of_samples_in_measurement);
-         vTaskDelay(50/portTICK_PERIOD_MS);
+        ESP_LOGI(""," Cycle time: %0.2f, number of samples: %0.2f sample period %0.2f", (ADC_continous::adc_measurements[4].measurement_period_duration* 1.0)/1000, (float)ADC_continous::adc_measurements[4].num_of_samples_in_measurement, ((ADC_continous::adc_measurements[4].measurement_period_duration* 1.0)/1000) / (float)ADC_continous::adc_measurements[4].num_of_samples_in_measurement);
+        ESP_LOGI(""," VAR [ -%0.2f | +%0.2f ] BASE: %0.2f", ADC_continous::adc_measurements[4].neg_variance_approx, ADC_continous::adc_measurements[4].pos_variance_approx, ADC_continous::adc_measurements[4].filtered_dc_base);
+        ESP_LOGI(""," MIN MAX [ -%0.2f | +%0.2f ] PP: %0.2f",  ADC_continous::adc_measurements[4].v_max, ADC_continous::adc_measurements[4].v_max,(ADC_continous::adc_measurements[4].filtered_peak_to_peak));
+        ESP_LOGI(""," FREQ: %0.4f, RMS: %0.2f PP/sqrt(2): %0.2f",ADC_continous::adc_measurements[4].frequency, (ADC_continous::adc_measurements[4].rms_result), (ADC_continous::adc_measurements[4].filtered_peak_to_peak)/1.41);        }
+        //ESP_LOGI("","adc1_ch0 new_measuremnet %d fast: %0.2f mean: %0.2f",ADC_continous::adc_measurements[0].new_measurement,ADC_continous::adc_measurements[0].filtered_fast_filter, ADC_continous::adc_measurements[0].filtered_dc_base);
+        vTaskDelay(50/portTICK_PERIOD_MS);
     }
 }
 
