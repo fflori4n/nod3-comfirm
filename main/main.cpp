@@ -149,8 +149,8 @@ void Main::loop(void){
     // wlan_interface.fastScan();
 
     
-    // ambient_bme280.read();
-    // mcu_info.update_mcu_telemetry();
+    //ambient_bme280.read();
+    //mcu_info.update_mcu_telemetry();
     
 
     //ESP_LOGI("TIME", "TIME SINCE STARTUP: %ld",ntpTime.espTimerUptime);
