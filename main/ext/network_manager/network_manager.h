@@ -232,7 +232,7 @@ namespace NETWORK
             /* arraylist to hold APs that are preset for connection if present */
             static uint8_t associated_ap_index;
             static constexpr bool enable_switch_to_higher_prio{false}; /* this will allow the ESP to leave a good connection and switch AP if a higher prio AP is present, TODO: could be used for OTA update, with a predefined name or prio*/
-            static std::array<wlan_access_point_id_t,2>  access_point_list;
+            static std::array<wlan_access_point_id_t,3>  access_point_list;
 
             static constexpr uint8_t maximum_number_of_APs{20};
             static constexpr uint8_t maimum_number_of_STAs{80};

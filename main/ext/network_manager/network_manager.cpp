@@ -14,14 +14,15 @@ namespace NETWORK
     std::array<Wlan::wlan_scan_devices_t, (Wlan::maximum_number_of_APs + Wlan::maimum_number_of_STAs) > Wlan::wlan_device_list;
 
     uint8_t Wlan::associated_ap_index = 0;
-    std::array<Wlan::wlan_access_point_id_t,2>  Wlan::access_point_list = {{
+    std::array<Wlan::wlan_access_point_id_t,3>  Wlan::access_point_list = {{
         { .ssid = "TS-uG65", .passwd = "4XfuPgEx", .device_mac = 0x00, .channel = 0x00, .low_rssi_tresh = -99, .priority = 0 },
-        { .ssid = "adsl sandor", .passwd = "floriflori", .device_mac = 0x00, .channel = 0x00, .low_rssi_tresh = -99, .priority = 0 }
+        { .ssid = "adsl sandor", .passwd = "floriflori", .device_mac = 0x00, .channel = 0x00, .low_rssi_tresh = -99, .priority = 0 },
+        { .ssid = "GGGGG", .passwd = "123456789", .device_mac = 0x00, .channel = 0x00, .low_rssi_tresh = -99, .priority = 0 }
     }};
 
     wifi_init_config_t Wlan::_wifiInitCfg = WIFI_INIT_CONFIG_DEFAULT();
     wifi_config_t Wlan::_wifiConfig{};
-    Wlan::wifi_power_save_e Wlan::wifi_power_save_mode{Wlan::wifi_power_save_e::psave_default};    /* power save min*/
+    Wlan::wifi_power_save_e Wlan::wifi_power_save_mode{Wlan::wifi_power_save_e::psave_disabled/*psave_default*/};    /* power save min*/
 
     uint64_t Wlan::esp_my_mac = 0x00;
 
@@ -312,6 +313,13 @@ void Wlan::_wifiEventHandler(void *event_handler_arg, esp_event_base_t event_bas
             const wifi_event_t event_type{static_cast<wifi_event_t>(event_id)};
 
             ESP_LOGI(NETWORK::Wlan::log_label, "WIFI_EVENT::%s", wifi_event_to_string(event_type));
+
+            /* on disconnect event:*/
+            if(event_type == WIFI_EVENT_STA_DISCONNECTED){
+                wifi_event_sta_disconnected_t* disconnect_event_data = static_cast<wifi_event_sta_disconnected_t*>(event_data);
+                ESP_LOGI(NETWORK::Wlan::log_label, "EVENT_DATA::%d, %d", disconnect_event_data->rssi, disconnect_event_data->reason);
+            }
+            
         }
         else{
             ESP_LOGW(NETWORK::Wlan::log_label, "unexpected event type: %s", event_base);
@@ -796,7 +804,7 @@ esp_err_t Wlan::fastScan(void)
 
 void task_manageWlanConnection(void *parameters){
 
-       
+        // some problems: https://github.com/espressif/arduino-esp32/issues/6430
 
         constexpr uint16_t WIFI_CONNECTION_CHECK_DELAY_SEC{5};
         constexpr uint16_t WIFI_CONNECTION_ATTEMPT_TIMEOUT_SEC{20};
@@ -811,7 +819,8 @@ void task_manageWlanConnection(void *parameters){
         wlan_interface.begin();
 
         for(;;){
-            
+
+            /*vTaskSuspendAll();*/
             if(Wlan::tWlanState::wlanState_rdyToConnect > wlan_interface.get_wlan_state()){
 
                /*wlan_interface.statistics.connection_ok_sec = 0;*/
@@ -860,8 +869,9 @@ void task_manageWlanConnection(void *parameters){
                 wlan_interface.scan_period_counter++;
             }
 
+            /*xTaskResumeAll();*/
             vTaskDelay((WIFI_CONNECTION_CHECK_DELAY_SEC * 1000) / portTICK_PERIOD_MS);
-
+        
             // /*wifiIF.disconnect_power_off();
             // vTaskDelay(20000 / portTICK_PERIOD_MS);*/
             // wifiIF.begin();

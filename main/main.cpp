@@ -14,6 +14,7 @@ Ntp_time ntpTime;
 MCUInfo mcu_info;
 Sleep_manager night_man;
 
+
 /* Config for I2C bus */
 constexpr i2c_config_t i2c_cfg{
         .mode = I2C_MODE_MASTER,
@@ -75,12 +76,13 @@ esp_err_t Main::init(void){
     printf("%" PRIu32 "MB %s flash\n", flash_size / (uint32_t)(1024 * 1024),
            (chip_info.features & CHIP_FEATURE_EMB_FLASH) ? "embedded" : "external");*/
 
+
     xTaskCreatePinnedToCore(
     NETWORK::task_manageWlanConnection,
     "manage_network",
     5000,
-    NULL,
-    7,
+    (void*)1,
+    2,
     NULL,
     0
   );
@@ -88,7 +90,7 @@ esp_err_t Main::init(void){
     task_adc_continous_measurement,
     "adc continous",
     5000,
-    NULL,
+    (void*)1,
     1,
     NULL,
     0
@@ -145,12 +147,12 @@ void Main::loop(void){
     /*}*/
 
     // wlan_interface.fastScan();
-    // vTaskDelay(5000/portTICK_PERIOD_MS);
-    // wlan_interface.fastScan();
+    vTaskDelay(5000/portTICK_PERIOD_MS);
+    wlan_interface.fastScan();
 
     
-    //ambient_bme280.read();
-    //mcu_info.update_mcu_telemetry();
+    ambient_bme280.read();
+    mcu_info.update_mcu_telemetry();
     
 
     //ESP_LOGI("TIME", "TIME SINCE STARTUP: %ld",ntpTime.espTimerUptime);
@@ -191,50 +193,51 @@ void Main::loop(void){
     // snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
     // ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
 
-    // wlan_interface.get_service_data(mqtt_service_data_buffer, 2048);
+    wlan_interface.get_service_data(mqtt_service_data_buffer, 2048);
     // ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
 
-    // esp_err_t connect_res = ha_websoc.connectAndAuthSocket(5, 1500);
+    esp_err_t connect_res = ha_websoc.connectAndAuthSocket(5, 1500);
 
-    // if (ESP_ERR_WIFI_BASE == connect_res)
-    // {
-    //     ESP_LOGE("WEBSOC", "No network, unable to connect.");
-    // }
-    // else
-    // {
+    if (ESP_ERR_WIFI_BASE == connect_res)
+    {
+        ESP_LOGE("WEBSOC", "No network, unable to connect.");
+    }
+    else
+    {
 
-    //     snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
-    //     ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
+        snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
+        ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
 
-    //     /* c0_current_sensor.get_service_data(mqtt_service_data_buffer, 2048);
-    //      ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
-    //      snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
-    //      ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);*/
+         //c0_current_sensor.get_service_data(mqtt_service_data_buffer, 2048);
+        continous_adc_manager.get_service_data_ac_input(mqtt_service_data_buffer, 2048, 4);
+        ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
+        snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
+        ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
 
-    //     ambient_bme280.get_service_data(mqtt_service_data_buffer, 2048);
-    //     ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
-    //     snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
-    //     ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
+        ambient_bme280.get_service_data(mqtt_service_data_buffer, 2048);
+        ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
+        snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
+        ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
 
-    //     ldr_resistor.get_service_data_ldr_resistor(mqtt_service_data_buffer, 2048);
-    //     ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
-    //     snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
-    //     ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
+        // ldr_resistor.get_service_data_ldr_resistor(mqtt_service_data_buffer, 2048);
+        // ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
+        // snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
+        // ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
 
-    //     mcu_info.get_service_data(mqtt_service_data_buffer, 2048);
-    //     ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
-    //     snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
-    //     ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
+        mcu_info.get_service_data(mqtt_service_data_buffer, 2048);
+        ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
+        snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
+        ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
 
-    //     ESP_LOGI("hello", "awake vs sleep seconds: %lld : %lld", nv_mcu_awake_sec, nv_mcu_sleep_sec);
+        //ESP_LOGI("hello", "awake vs sleep seconds: %lld : %lld", nv_mcu_awake_sec, nv_mcu_sleep_sec);
 
-    //     ha_websoc.disconnect();
+        ha_websoc.disconnect();
 
-    //     night_man.schedule_rtc_wakeup(180000);
-    //     night_man.enter_deep_sleep();
+        // night_man.schedule_rtc_wakeup(180000);
+        // night_man.enter_deep_sleep();
 
         
-    // }
+    }
 
     // ESP_LOGE("WEBSOC", " uptime: %lld", nv_mcu_uptime_sec);
     
@@ -259,7 +262,7 @@ void Main::loop(void){
     //     adc_reading /= 10;
     // ESP_LOGI("ADC_READ", "%ld", adc_reading);
 
-    vTaskDelay(100/ portTICK_PERIOD_MS);
+    vTaskDelay((2 * 60 * 1000.0f) / portTICK_PERIOD_MS);
     /*nv_mcu_uptime_sec += 30;*/
     fflush(stdout);
     return;
