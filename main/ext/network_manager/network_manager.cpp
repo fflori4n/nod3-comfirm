@@ -1,5 +1,6 @@
 #include "network_manager.h"
 
+class ADC_continous;    /* forward declared because need to pause ADC when wifi is sta_begin ing*/
 /* static member init */
 NETWORK::Wlan wlan_interface;
 
@@ -7,12 +8,14 @@ namespace NETWORK
 {
     
     
+    
     Wlan::tWlanState Wlan::_wlanIfaceState{Wlan::tWlanState::wlanState_notInitialised};
     Wlan::wlan_manager_stats_t Wlan::statistics;
     std::mutex Wlan::wifi_driver_mutex{};
     std::mutex Wlan::wifi_driver_callback_mutex{};
     std::array<Wlan::wlan_scan_devices_t, (Wlan::maximum_number_of_APs + Wlan::maimum_number_of_STAs) > Wlan::wlan_device_list;
-
+    
+    bool Wlan::wifi_ext_task_inhibit_flag = true;
     uint8_t Wlan::associated_ap_index = 0;
     std::array<Wlan::wlan_access_point_id_t,3>  Wlan::access_point_list = {{
         { .ssid = "TS-uG65", .passwd = "4XfuPgEx", .device_mac = 0x00, .channel = 0x00, .low_rssi_tresh = -99, .priority = 0 },
@@ -23,6 +26,7 @@ namespace NETWORK
     wifi_init_config_t Wlan::_wifiInitCfg = WIFI_INIT_CONFIG_DEFAULT();
     wifi_config_t Wlan::_wifiConfig{};
     Wlan::wifi_power_save_e Wlan::wifi_power_save_mode{Wlan::wifi_power_save_e::psave_disabled/*psave_default*/};    /* power save min*/
+    /*esp_wifi_set_ps(WIFI_PS_NONE);*/
 
     uint64_t Wlan::esp_my_mac = 0x00;
 
@@ -650,6 +654,8 @@ esp_err_t Wlan::fastScan(void)
     wifi_ap_record_t ap_info[maximum_number_of_APs];
     uint16_t ap_count = 0;
 
+    vTaskDelay(100 / portTICK_PERIOD_MS);       /* wait a little bit, to let other tasks pause*/
+
     if (tWlanState::wlanState_notInitialised == _wlanIfaceState)
     {
         retStatus = this->init();
@@ -870,8 +876,10 @@ void task_manageWlanConnection(void *parameters){
             }
 
             /*xTaskResumeAll();*/
-            vTaskDelay((WIFI_CONNECTION_CHECK_DELAY_SEC * 1000) / portTICK_PERIOD_MS);
-        
+            Wlan::wifi_ext_task_inhibit_flag = false;
+            vTaskDelay((10 * WIFI_CONNECTION_CHECK_DELAY_SEC * 1000) / portTICK_PERIOD_MS);
+            Wlan::wifi_ext_task_inhibit_flag = true;
+            vTaskDelay(1500 / portTICK_PERIOD_MS);
             // /*wifiIF.disconnect_power_off();
             // vTaskDelay(20000 / portTICK_PERIOD_MS);*/
             // wifiIF.begin();
@@ -879,3 +887,5 @@ void task_manageWlanConnection(void *parameters){
 }
 
 } /* NETWORK */
+
+

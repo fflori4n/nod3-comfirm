@@ -1,9 +1,17 @@
 #define pragma once
 
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+//#include "freertos/heap_caps.h"
 #include <array>
 #include <string>
+
+/* this is important for ADC continous */
+#define CONFIG_ADC_CONTINUOUS_ISR_IRAM_SAFE 1
+
+/*#include "soc/adc_reg.h"*/
+#include "soc/system_reg.h"
 
 #include "esp_chip_info.h"
 #include "esp_log.h"
@@ -37,6 +45,7 @@
 
 #include "bmx280/bmx280.c"
 #include "analogue_in/analogue_in.cpp"
+#include "sound_in_fft/sound_in_fft.cpp"
 #include "adc_periodic/adc_periodic.cpp"
 #include "ha_websocket/ha_websocket.cpp"
 #include "sleep_manager/sleep_manager.cpp"

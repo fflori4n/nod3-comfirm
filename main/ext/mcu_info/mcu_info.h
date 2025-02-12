@@ -1,5 +1,6 @@
 #include <esp_system.h>
 
+
 RTC_FAST_ATTR uint64_t nv_mcu_uptime_sec;
 
 class MCUInfo{
@@ -192,3 +193,21 @@ RTC_FAST_ATTR uint64_t nv_mcu_awake_sec;*/
     
 
 };
+
+void printFreeRTOSStats() {
+    ESP_LOGI("RTOS_STATS", "FreeRTOS Stats:");
+
+    // Print FreeRTOS Memory
+    size_t freeHeap = xPortGetFreeHeapSize(); // Free heap memory in bytes
+    size_t totalHeap = 0; //xPortGetTotalHeapSize(); // Total heap memory in bytes
+    size_t minFreeHeap = xPortGetMinimumEverFreeHeapSize(); // Minimum free heap memory
+    ESP_LOGI("RTOS_STATS", "Free Heap: %d / %d bytes", freeHeap, totalHeap);
+    ESP_LOGI("RTOS_STATS", "Minimum Free Heap: %d bytes", minFreeHeap);
+
+    // Print Task List
+    ESP_LOGI("RTOS_STATS", "Task List:");
+    char taskList[2048];  // Ensure you have enough space for the task list
+    //vTaskList(taskList);  // Get the task list
+
+    ESP_LOGI("RTOS_STATS", "");
+}

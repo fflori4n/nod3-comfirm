@@ -11,7 +11,7 @@
 
 /*MCUInfo mcuInfo;*/
 Ntp_time ntpTime;
-MCUInfo mcu_info;
+//MCUInfo mcu_info;
 Sleep_manager night_man;
 
 
@@ -30,7 +30,7 @@ constexpr i2c_config_t i2c_cfg{
 
 bmx280_sensor ambient_bme280;
 /*ADC_input current_transformer_pin(ADC_UNIT_1,ADC_CHANNEL_4);*/
-ADC_input ldr_resistor(ADC_UNIT_1,ADC_CHANNEL_4);
+/*ADC_input ldr_resistor(ADC_UNIT_1,ADC_CHANNEL_4);*/
 Homeassistant_websocket ha_websoc;
 char* sensor_websoc_template = "{\"id\":%%d,\"type\":\"call_service\",\"domain\":\"websoc_sensor\",\"service\":\"acct_test_sens.set_values\",\"service_data\":{%s}}";
 char msg[2048];
@@ -64,6 +64,13 @@ esp_err_t Main::init(void){
     vTaskDelay(2000/ portTICK_PERIOD_MS); /* wait for debugger UART to connect, only for dev. */
     ESP_LOGI("DBG_UART", "[ OK ]");
     ESP_LOGI("INIT STUB", "");
+
+    if(ESP_RST_PANIC == esp_reset_reason()){
+        while(true){
+            vTaskDelay((1000.0f) / portTICK_PERIOD_MS);
+        }
+    }
+
     night_man.execute_wake_stub();
     
     
@@ -82,16 +89,16 @@ esp_err_t Main::init(void){
     "manage_network",
     5000,
     (void*)1,
-    2,
+    7,
     NULL,
     0
   );
     xTaskCreatePinnedToCore(
     task_adc_continous_measurement,
     "adc continous",
-    5000,
+    8000,
     (void*)1,
-    1,
+    2,
     NULL,
     0
   );
@@ -108,11 +115,11 @@ esp_err_t Main::init(void){
     // ESP_ERROR_CHECK(bmx280_configure(bmx280, &bmx_cfg));
 
     /*current_transformer_pin.configure(ADC_WIDTH_BIT_12, 1u);*/
-    ldr_resistor.configure(ADC_WIDTH_BIT_12, 1u);
+    /*ldr_resistor.configure(ADC_WIDTH_BIT_12, 1u);*/
 
-    mcu_info.load_session_nonchanging();
-    mcu_info.update_mcu_telemetry();
-    mcu_info.print_detailed();
+    // mcu_info.load_session_nonchanging();
+    // mcu_info.update_mcu_telemetry();
+    // mcu_info.print_detailed();
 
     if(ESP_OK != i2c_param_config(I2C_NUM_0, &i2c_cfg)){
         ESP_LOGE("I2C_INIT", "failed to set I2C config");
@@ -122,9 +129,6 @@ esp_err_t Main::init(void){
     }
 
     ambient_bme280.begin(I2C_NUM_0, "BMX0", 19.0);
-
-    
-
     
 
     constexpr uint32_t sntp_sync_seconds{30*60*1000};
@@ -140,6 +144,8 @@ esp_err_t Main::init(void){
 
 void Main::loop(void){
 
+    vTaskDelay(100 / portTICK_PERIOD_MS);
+
 
     /*for(int i =0; i < 200; i++){*/
 
@@ -147,12 +153,13 @@ void Main::loop(void){
     /*}*/
 
     // wlan_interface.fastScan();
-    vTaskDelay(5000/portTICK_PERIOD_MS);
-    wlan_interface.fastScan();
+    //wlan_interface.fastScan();
 
     
     ambient_bme280.read();
-    mcu_info.update_mcu_telemetry();
+    // mcu_info.update_mcu_telemetry();
+
+   
     
 
     //ESP_LOGI("TIME", "TIME SINCE STARTUP: %ld",ntpTime.espTimerUptime);
@@ -196,6 +203,8 @@ void Main::loop(void){
     wlan_interface.get_service_data(mqtt_service_data_buffer, 2048);
     // ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
 
+    
+
     esp_err_t connect_res = ha_websoc.connectAndAuthSocket(5, 1500);
 
     if (ESP_ERR_WIFI_BASE == connect_res)
@@ -209,7 +218,7 @@ void Main::loop(void){
         ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
 
          //c0_current_sensor.get_service_data(mqtt_service_data_buffer, 2048);
-        continous_adc_manager.get_service_data_ac_input(mqtt_service_data_buffer, 2048, 4);
+        continous_adc_manager.get_service_data_ac_input(mqtt_service_data_buffer, 2048, 3);
         ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
         snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
         ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
@@ -224,10 +233,10 @@ void Main::loop(void){
         // snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
         // ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
 
-        mcu_info.get_service_data(mqtt_service_data_buffer, 2048);
-        ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
-        snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
-        ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
+        //mcu_info.get_service_data(mqtt_service_data_buffer, 2048);
+        // ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
+        // snprintf(msg, 2048, sensor_websoc_template, mqtt_service_data_buffer);
+        // ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
 
         //ESP_LOGI("hello", "awake vs sleep seconds: %lld : %lld", nv_mcu_awake_sec, nv_mcu_sleep_sec);
 
@@ -238,6 +247,9 @@ void Main::loop(void){
 
         
     }
+
+    
+    
 
     // ESP_LOGE("WEBSOC", " uptime: %lld", nv_mcu_uptime_sec);
     
@@ -262,9 +274,66 @@ void Main::loop(void){
     //     adc_reading /= 10;
     // ESP_LOGI("ADC_READ", "%ld", adc_reading);
 
+    // portMUX_TYPE adc_reg_lock = portMUX_INITIALIZER_UNLOCKED;
+    // #define ADC_REG_LOCK_ENTER()       portENTER_CRITICAL(&adc_reg_lock)
+    // #define ADC_REG_LOCK_EXIT()        portEXIT_CRITICAL(&adc_reg_lock)
+
+    // ADC_REG_LOCK_ENTER();
+    //REG_SET_BIT(, SYSTEM_APB_SARADC_RST_V); // Setting bit 28 to 1
+    // ADC_REG_LOCK_EXIT();
+
+    // ESP_LOGE("ADC_REG","APB_SARADC_DMA_CONF_REG: %x ", GET_PERI_REG_BITS(APB_SARADC_DMA_CONF_REG, 31, 0));  /* should be */
+    // ESP_LOGE("ADC_REG","SYSTEM_PERIP_RST_EN0_REG: %x ", GET_PERI_REG_BITS(SYSTEM_PERIP_RST_EN0_REG, 31, 0));
+
+    // portDISABLE_INTERRUPTS();
+    // //SET_PERI_REG_MASK(SYSTEM_PERIP_RST_EN1_REG, SYSTEM_DMA_RST); 
+    // SET_PERI_REG_MASK(APB_SARADC_DMA_CONF_REG, APB_SARADC_APB_ADC_RESET_FSM);
+    // SET_PERI_REG_MASK(SYSTEM_PERIP_RST_EN0_REG, SYSTEM_APB_SARADC_RST);
+    // 
+    // // SET_PERI_REG_MASK(SYSTEM_PERIP_CLK_EN0_REG, SYSTEM_APB_SARADC_CLK_EN);
+    // SET_PERI_REG_MASK(APB_SARADC_CTRL2_REG, APB_SARADC_TIMER_EN);
+    // portENABLE_INTERRUPTS();
+   
+    //SET_PERI_REG_MASK(APB_SARADC_DMA_CONF_REG, APB_SARADC_DMA_CONF_REG);
+    
+
+
+                 /* no good, stops the dma callbacks */
+    //WRITE_PERI_REG(APB_SARADC_DMA_CONF_REG, 0x80000140);
+    /*SET_PERI_REG_MASK(APB_SARADC_DMA_CONF_REG, APB_SARADC_APB_ADC_EOF_NUM);*/
+
+    /*CLEAR_PERI_REG_MASK(SYSTEM_PERIP_CLK_EN1_REG, SYSTEM_TSENS_CLK_EN);*/
+    //CLEAR_PERI_REG_MASK(APB_SARADC_APB_TSENS_CTRL_REG, APB_SARADC_TSENS_PU);
+
+    
+     
+
+
+    //SET_PERI_REG_MASK(SYSTEM_APB_SARADC_RST, 0xFFFF); /* clear the dma pointer */
+
+    //SET_PERI_REG_MASK(APB_SARADC_START, APB_SARADC_START_M);    /* start SAR ADC */
+    //SET_PERI_REG_MASK(APB_SARADC_START_FORCE, APB_SARADC_START_FORCE_M);    /* force start SAR ADC */
+
+    // WRITE_PERI_REG( APB_SARADC_DMA_CONF_REG, 
+	// 	1<<APB_SARADC_APB_ADC_TRANS_S |
+	// 	(sizeof(link_buf[0])/sizeof(link_buf[0][0]))<<APB_SARADC_APB_ADC_EOF_NUM_S );
+    // portDISABLE_INTERRUPTS();
+    // SET_PERI_REG_MASK(SYSTEM_PERIP_RST_EN0_REG, SYSTEM_APB_SARADC_RST);
+    // CLEAR_PERI_REG_MASK(SYSTEM_PERIP_RST_EN0_REG, SYSTEM_APB_SARADC_RST);
+    // WRITE_PERI_REG( APB_SARADC_DMA_CONF_REG, 1<<APB_SARADC_APB_ADC_TRANS_S | (sizeof(2) / sizeof(adc_channel_t)) << APB_SARADC_APB_ADC_EOF_NUM_S );
+    // portENABLE_INTERRUPTS();
+
+    printFreeRTOSStats();
+  
+    adc_continous_pause = false;
+    
+
     vTaskDelay((2 * 60 * 1000.0f) / portTICK_PERIOD_MS);
     /*nv_mcu_uptime_sec += 30;*/
     fflush(stdout);
+    adc_continous_pause = true;
+    vTaskDelay(1500 / portTICK_PERIOD_MS);
+
     return;
 }
 

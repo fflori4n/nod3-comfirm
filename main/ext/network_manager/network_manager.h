@@ -251,7 +251,7 @@ namespace NETWORK
             static uint64_t macAddress;
             uint32_t wifi_connected_sec;
             uint32_t wifi_trying_to_connect;
-            
+            static bool wifi_ext_task_inhibit_flag;
 
             static std::mutex wifi_driver_mutex;
             /* Maybe it makes sense to use a separate mutex for callbacks because they are async compred to main task. */
@@ -278,7 +278,14 @@ namespace NETWORK
             template<typename cstr_type> esp_err_t sta_connect(cstr_type* &ssid, cstr_type* &passwd);
             esp_err_t disconnect_power_off(void);
 
-            static esp_err_t is_connected(void) { return (tWlanState::wlanState_connected == _wlanIfaceState ) ? (ESP_OK) : (ESP_FAIL);};   /* note: only reading*/
+            static esp_err_t is_connected(void) {
+                
+                if(false != Wlan::wifi_ext_task_inhibit_flag)
+                {
+                    return ESP_ERR_NOT_ALLOWED;
+                }
+                return (tWlanState::wlanState_connected == _wlanIfaceState ) ? (ESP_OK) : (ESP_FAIL);
+            }
             
             esp_err_t loadMACAddress(void);
             esp_err_t fastScan(void);
