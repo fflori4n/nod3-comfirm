@@ -877,7 +877,7 @@ void task_manageWlanConnection(void *parameters){
 
             /*xTaskResumeAll();*/
             Wlan::wifi_ext_task_inhibit_flag = false;
-            vTaskDelay((10 * WIFI_CONNECTION_CHECK_DELAY_SEC * 1000) / portTICK_PERIOD_MS);
+            vTaskDelay((WIFI_CONNECTION_CHECK_DELAY_SEC * 1000) / portTICK_PERIOD_MS);
             Wlan::wifi_ext_task_inhibit_flag = true;
             vTaskDelay(1500 / portTICK_PERIOD_MS);
             // /*wifiIF.disconnect_power_off();

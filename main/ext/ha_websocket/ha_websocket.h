@@ -4,6 +4,8 @@
 static constexpr uint16_t txrx_buffer_size{2048};
 static char rxtx_buffer[txrx_buffer_size];
 
+#define WEBSOC_SENSOR_NAME "acct_test_sens"
+
 typedef struct {
     int data_len;    
     uint8_t op_code;                       
@@ -32,9 +34,11 @@ typedef struct {
 class Homeassistant_websocket
 {
 
-private:
+public:
   static constexpr const char *ha_websoc_log_tag{"HAWEBSOC"};
+  char* ha_websoc_header_template = "{\"id\":%%d,\"type\":\"call_service\",\"domain\":\"websoc_sensor\",\"service\":\""WEBSOC_SENSOR_NAME".set_values\",\"service_data\":{%s}}";
 
+private:
   /*static constexpr const char *ha_websoc_endpoint{"ws://192.168.1.199:8123/api/websocket"};*/
   static constexpr const char *ha_websoc_endpoint{"ws://fflori4n.duckdns.org:8123/api/websocket"};
   static constexpr const char *ha_websoc_token{"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJhNjY4OTk1ZGQ5Mzg0YWRiOGEwZTk1OGUxZmM0YWJlZiIsImlhdCI6MTcwNTI0MjcyOSwiZXhwIjoyMDIwNjAyNzI5fQ.VKxml-fWpsuBZExIHViE2WEg1ZqxDcbNFFKWJIyflhc"};

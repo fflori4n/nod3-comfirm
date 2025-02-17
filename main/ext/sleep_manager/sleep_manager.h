@@ -74,6 +74,20 @@ class Sleep_manager{
     //     return ESP_OK;
     // }
 
+    void update_awake_time(){
+
+        time_t mcu_time_now_unix = 0;
+        esp_err_t time_status = Ntp_time::get_esp_rtc_time(mcu_time_now_unix);
+
+        if(0 != nv_last_deep_sleep_entered_exited_at_unix){
+            ESP_LOGW("NIGHTMAN", "MCU was awake for: %lld seconds. Uptime logged.", (mcu_time_now_unix - nv_last_deep_sleep_entered_exited_at_unix));
+            nv_mcu_awake_sec += (mcu_time_now_unix - nv_last_deep_sleep_entered_exited_at_unix);
+        }
+        else{
+            nv_last_deep_sleep_entered_exited_at_unix = mcu_time_now_unix;
+        }
+    }
+
     void enter_deep_sleep(void) { 
 
         /* TODO: Disconnect wifi*/
