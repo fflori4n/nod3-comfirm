@@ -9,7 +9,7 @@ namespace NETWORK
     
     
     
-    Wlan::tWlanState Wlan::_wlanIfaceState{Wlan::tWlanState::wlanState_notInitialised};
+    Wlan::wlan_state_t Wlan::_wlanIfaceState{Wlan::wlan_state_t::waiting_init};
     Wlan::wlan_manager_stats_t Wlan::statistics;
     std::mutex Wlan::wifi_driver_mutex{};
     std::mutex Wlan::wifi_driver_callback_mutex{};
@@ -18,7 +18,7 @@ namespace NETWORK
     bool Wlan::wifi_ext_task_inhibit_flag = true;
     uint8_t Wlan::associated_ap_index = 0;
     std::array<Wlan::wlan_access_point_id_t,3>  Wlan::access_point_list = {{
-        { .ssid = "TS-uG65", .passwd = "4XfuPgEx", .device_mac = 0x00, .channel = 0x00, .low_rssi_tresh = -99, .priority = 0 },
+        { .ssid = "", .passwd = "", .device_mac = 0x00, .channel = 0x00, .low_rssi_tresh = -99, .priority = 0 },
         { .ssid = "adsl sandor", .passwd = "floriflori", .device_mac = 0x00, .channel = 0x00, .low_rssi_tresh = -99, .priority = 0 },
         { .ssid = "GGGGG", .passwd = "123456789", .device_mac = 0x00, .channel = 0x00, .low_rssi_tresh = -99, .priority = 0 }
     }};
@@ -41,7 +41,7 @@ esp_err_t Wlan::init(void){
    /*std::lock_guard<std::mutex> guard(wifi_driver_mutex);*/
     esp_err_t retStatus = ESP_OK;
 
-    if( tWlanState::wlanState_notInitialised == _wlanIfaceState){
+    if( wlan_state_t::waiting_init == _wlanIfaceState){
 
         /* NOTE: These two break and reboot the RTOS when called twice, so init moved to main::init */
         /*retStatus = esp_netif_init();*/
@@ -80,24 +80,32 @@ esp_err_t Wlan::init(void){
 
         if(ESP_OK == retStatus){
 
-            if(strlen( Wlan::access_point_list[associated_ap_index].ssid) > sizeof(_wifiConfig.sta.ssid)){
-                ESP_LOGW(log_label, "SSID too long, will be trancated to buffer size!");
-            }
-            if(strlen(Wlan::access_point_list[associated_ap_index].passwd) > sizeof(_wifiConfig.sta.password)){
-                ESP_LOGW(log_label, "SSID too long, will be trancated to buffer size!");
-            }
+            /* replace the ssid and password, if there is a known AP loaded from Nvs */
 
-            memcpy(_wifiConfig.sta.ssid, Wlan::access_point_list[associated_ap_index].ssid, std::min(strlen(Wlan::access_point_list[associated_ap_index].ssid), sizeof(_wifiConfig.sta.ssid)));
-            memcpy(_wifiConfig.sta.password, Wlan::access_point_list[associated_ap_index].passwd, std::min(strlen(Wlan::access_point_list[associated_ap_index].passwd),sizeof(_wifiConfig.sta.password)));
+            if(Nvs_Manager::config_in_use == user_cfg_basic.rdy_for_update){
 
+                snprintf((char*)(_wifiConfig.sta.ssid), 40u, "%s", (char*)user_cfg_basic.ssid);
+                snprintf((char*)(_wifiConfig.sta.password), 40u, "%s", (char*)user_cfg_basic.passwd);
+
+                ESP_LOGW(NETWORK::Wlan::log_label, "AP for connection set based on Nvs data: ssid:%s passwd:%s",_wifiConfig.sta.ssid, _wifiConfig.sta.password);
+            }
+            else{
+                if(strlen( Wlan::access_point_list[associated_ap_index].ssid) > sizeof(_wifiConfig.sta.ssid)){
+                ESP_LOGW(log_label, "SSID too long, will be trancated to buffer size!");
+                }
+                if(strlen(Wlan::access_point_list[associated_ap_index].passwd) > sizeof(_wifiConfig.sta.password)){
+                ESP_LOGW(log_label, "SSID too long, will be trancated to buffer size!");
+                }
+
+                memcpy(_wifiConfig.sta.ssid, Wlan::access_point_list[associated_ap_index].ssid, std::min(strlen(Wlan::access_point_list[associated_ap_index].ssid), sizeof(_wifiConfig.sta.ssid)));
+                memcpy(_wifiConfig.sta.password, Wlan::access_point_list[associated_ap_index].passwd, std::min(strlen(Wlan::access_point_list[associated_ap_index].passwd),sizeof(_wifiConfig.sta.password)));
+            }
         }
 
         if(ESP_OK == retStatus)
         {
             esp_wifi_set_config(WIFI_IF_STA, &_wifiConfig);
         }
-
-        _wlanIfaceState = tWlanState::wlanState_initCompleted;
     }
 
     return retStatus;
@@ -126,23 +134,68 @@ esp_err_t Wlan::set_wifi_connection_target(int8_t ap_index){
     return retStatus;
 }
 
-esp_err_t Wlan::begin(void){
+esp_err_t Wlan::sta_connect(void){
 
     esp_err_t retStatus = ESP_OK;
 
-    if(tWlanState::wlanState_notInitialised == _wlanIfaceState){
+    if(wlan_state_t::waiting_init == _wlanIfaceState){
         retStatus = this->init();
     }
 
     if(ESP_OK == retStatus){
         
-        _wlanIfaceState = tWlanState::wlanState_rdyToConnect;
+        _wlanIfaceState = wlan_state_t::standby;
         esp_wifi_set_mode(WIFI_MODE_STA);
+
+        esp_wifi_set_max_tx_power(20 * 4);
+
+        retStatus = esp_wifi_set_max_tx_power(80);  // 20 dBm
+        if (retStatus != ESP_OK) {
+            printf("Failed to set TX power: %s\n", esp_err_to_name(retStatus));
+        }
+        
         esp_wifi_start();
         retStatus = esp_wifi_connect();
     }
     
     return retStatus;
+}
+
+esp_err_t Wlan::start_ap(){
+    
+    esp_err_t res = ESP_OK;
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+
+    esp_netif_create_default_wifi_ap();
+
+    
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    res = esp_event_handler_instance_register(WIFI_EVENT,ESP_EVENT_ANY_ID,&_wifiEventHandler,nullptr,nullptr);
+
+    wifi_config_t wifi_config = {
+        .ap = {
+            .ssid = "jklello",
+            .password = "123456789",
+            .ssid_len = strlen("jklello"),
+            .channel = 6,
+            .authmode = WIFI_AUTH_WPA2_PSK,
+            .max_connection = 1,
+            .pmf_cfg = {
+                    .required = true,
+            },
+        },
+    };
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    _wlanIfaceState = wlan_state_t::ap_active;
+
+    ESP_LOGI("wifi_AP", "wifi_init_softap finished. SSID:%s password:%s channel:%d","jklello", "123456789", 6);
+
+    return res;
 }
 
 esp_err_t Wlan::disconnect_power_off(void)
@@ -162,11 +215,11 @@ esp_err_t Wlan::disconnect_power_off(void)
     if (lock.owns_lock())
     {
 
-        if (tWlanState::wlanState_notInitialised != _wlanIfaceState)
+        if (wlan_state_t::waiting_init != _wlanIfaceState)
         {
              ESP_LOGI(NETWORK::Wlan::log_label, "disconnecting");
             retStatus = esp_wifi_disconnect(); /* Graceful disconnect from AP, or NOT connceted/ No init return if not connected*/
-            _wlanIfaceState = tWlanState::wlanState_disconnected;
+            /*_wlanIfaceState = wlan_state_t::wlanState_disconnected;*/
 
             if(Wlan::statistics.num_of_reconnect >= 1){
                 Wlan::statistics.num_of_reconnect--;
@@ -180,13 +233,13 @@ esp_err_t Wlan::disconnect_power_off(void)
                 /*esp_wifi_deinit();*/
                /*esp_wifi_clear_default_wifi_driver_and_handlers(p_netif);*/ // <-add this!
                 /*esp_netif_destroy(p_netif);*/
-                _wlanIfaceState = tWlanState::wlanState_initCompleted;
+                _wlanIfaceState = wlan_state_t::inactive;
     
                 // esp_wifi_deinit();  /* clear init and stop wifi task - next time, init is needed again.*/
                 
             }
             retStatus = ESP_OK;
-            _wlanIfaceState = tWlanState::wlanState_initCompleted;
+            _wlanIfaceState = wlan_state_t::inactive;
         }
     }
     else
@@ -203,17 +256,7 @@ esp_err_t Wlan::begin(char* ssid, char* passwd){
 
 
     /*TODO: set wifi config*/
-    return this->begin();
-}
-
-/* TODO: not very memory efficient but convinient to avoid char* vs const char* issues */
-/* this also does not work when one argument is const char, the other is not. so consider casting?? other option to avoid casting random crap??*/
-template<typename cstr_type>
-esp_err_t Wlan::sta_connect(cstr_type* &ssid, cstr_type* &passwd) {
-
-  ESP_LOGI("WLAN","ssid: %s, passwd: %s", ssid, passwd);
-
-  return ESP_FAIL;
+    return this->sta_connect();
 }
 
 void Wlan::_wifiEventHandler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
@@ -250,13 +293,13 @@ void Wlan::_wifiEventHandler(void *event_handler_arg, esp_event_base_t event_bas
                 {
                 case IP_EVENT_STA_GOT_IP:
                 {
-                    _wlanIfaceState = tWlanState::wlanState_connected;
+                    _wlanIfaceState = wlan_state_t::sta_connection_ok;
                     break;
                 }
 
                 case IP_EVENT_STA_LOST_IP:
                 {
-                    _wlanIfaceState = tWlanState::wlanState_waitingForIP;
+                    _wlanIfaceState = wlan_state_t::sta_wait_for_ip;
                     break;
                 }
 
@@ -273,7 +316,7 @@ void Wlan::_wifiEventHandler(void *event_handler_arg, esp_event_base_t event_bas
                 {
                 case WIFI_EVENT_STA_START:
                 {
-                    _wlanIfaceState = tWlanState::wlanState_connecting;
+                    _wlanIfaceState = wlan_state_t::sta_wait_for_connection;
                     break;
                 }
 
@@ -281,7 +324,7 @@ void Wlan::_wifiEventHandler(void *event_handler_arg, esp_event_base_t event_bas
 
                 case WIFI_EVENT_STA_CONNECTED:
                 {
-                    _wlanIfaceState = tWlanState::wlanState_waitingForIP;
+                    _wlanIfaceState = wlan_state_t::sta_wait_for_ip;
                     Wlan::statistics.num_of_reconnect++;
                     break;
                 }
@@ -290,10 +333,25 @@ void Wlan::_wifiEventHandler(void *event_handler_arg, esp_event_base_t event_bas
                 case WIFI_EVENT_STA_DISCONNECTED:
                 {
                     /* TODO: check.*/
-                    _wlanIfaceState = tWlanState::wlanState_rdyToConnect;//tWlanState::wlanState_initCompleted;
+                    _wlanIfaceState = wlan_state_t::standby;//tWlanState::wlanState_initCompleted;
                     wlan_interface.statistics.connection_ok_sec = 0;
                     break;
                 }
+
+                case WIFI_EVENT_AP_STACONNECTED:
+                {
+                    wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
+                    ESP_LOGI(NETWORK::Wlan::log_label, "station "MACSTR" join, AID=%d", MAC2STR(event->mac), event->aid);
+                    break;
+                }
+
+                case WIFI_EVENT_AP_STADISCONNECTED:
+                {
+                    wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
+                    ESP_LOGI(NETWORK::Wlan::log_label, "station "MACSTR" leave, AID=%d, reason=%d", MAC2STR(event->mac), event->aid, event->reason);
+                    break;
+                }
+
                 default:
                     /* do nothing */
                     break;
@@ -656,15 +714,15 @@ esp_err_t Wlan::fastScan(void)
 
     vTaskDelay(100 / portTICK_PERIOD_MS);       /* wait a little bit, to let other tasks pause*/
 
-    if (tWlanState::wlanState_notInitialised == _wlanIfaceState)
+    if (wlan_state_t::waiting_init == _wlanIfaceState)
     {
         retStatus = this->init();
     }
 
     /* NOTE: W (609) wifi:sta_scan: STA is connecting, scan are not allowed!*/
-    if (tWlanState::wlanState_rdyToConnect == _wlanIfaceState ||
-        tWlanState::wlanState_connecting == _wlanIfaceState ||
-        tWlanState::wlanState_waitingForIP == _wlanIfaceState)
+    if (wlan_state_t::standby == _wlanIfaceState ||
+        wlan_state_t::sta_wait_for_connection == _wlanIfaceState ||
+        wlan_state_t::sta_wait_for_ip == _wlanIfaceState)
     {
 
         
@@ -690,9 +748,9 @@ esp_err_t Wlan::fastScan(void)
     {
         
 
-        constexpr const uint16_t scan_time_per_channel_ms{500};/*{1200}*/;
-        constexpr const uint16_t scan_time_home_dwell_ms{250};/*{250};*/
-        constexpr const uint16_t scan_time_extra_margin_ms{2000};/*{2000};*/
+        constexpr const uint16_t scan_time_per_channel_ms{500}; /* 500 */
+        constexpr const uint16_t scan_time_home_dwell_ms{250};  /* 250 */
+        constexpr const uint16_t scan_time_extra_margin_ms{2000};   /* 2000 */
 
         constexpr const wifi_scan_config_t scan_config = { 
             .show_hidden = true, 
@@ -808,7 +866,7 @@ esp_err_t Wlan::fastScan(void)
     return retStatus;
 }
 
-void task_manageWlanConnection(void *parameters){
+void task_wlan_manager(void *parameters){
 
         // some problems: https://github.com/espressif/arduino-esp32/issues/6430
 
@@ -821,65 +879,143 @@ void task_manageWlanConnection(void *parameters){
         wlan_interface.loadMACAddress();
 
         /*wlan_interface.statistics.connection_ok_sec = 0;*/
-        wlan_interface.wifi_trying_to_connect = 0;
-        wlan_interface.begin();
+        //wlan_interface.wifi_trying_to_connect = 0;
+        //wlan_interface.sta_connect();
+        
 
         for(;;){
 
-            /*vTaskSuspendAll();*/
-            if(Wlan::tWlanState::wlanState_rdyToConnect > wlan_interface.get_wlan_state()){
+            switch(((Wlan::wlan_state_t)wlan_interface.get_wlan_state()))
+            {
 
-               /*wlan_interface.statistics.connection_ok_sec = 0;*/
-               wlan_interface.wifi_trying_to_connect = 0;
-               wlan_interface.begin();
-            } 
-            else if(wlan_interface.get_wlan_state() >= Wlan::tWlanState::wlanState_connected){
-                wlan_interface.statistics.connection_ok_sec += WIFI_CONNECTION_CHECK_DELAY_SEC;
-                wlan_interface.wifi_trying_to_connect = 0;
-
-                /*ESP_LOGI(NETWORK::Wlan::log_label, "connected for: %ld", wlan_interface.statistics.connection_ok_sec);*/
-            }
-            else{
-                /* trying to connect, but still not connected */
-
-               /* wlan_interface.statistics.average_connecting_time_sec = ((wlan_interface.statistics.average_connecting_time_sec + wlan_interface.wifi_trying_to_connect)/2.0);*/
-
-                if(wlan_interface.wifi_trying_to_connect <= WIFI_CONNECTION_ATTEMPT_TIMEOUT_SEC){
-                    wlan_interface.wifi_trying_to_connect += WIFI_CONNECTION_CHECK_DELAY_SEC;
-                }
-                else{
-                    wlan_interface.statistics.connection_ok_sec = 0;
+                case Wlan::wlan_state_t::waiting_init:
+                {
                     wlan_interface.wifi_trying_to_connect = 0;
-                    /* TODO: crude delay, can think of something smarter */
-                    
-                    ESP_LOGW(NETWORK::Wlan::log_label, "was unable to connect for: %d sec, will retry in: %d secs", WIFI_CONNECTION_ATTEMPT_TIMEOUT_SEC, WIFI_PAUSE_BEFORE_RECONNECT_ATTEMPT_SEC);
-                    vTaskDelay((1000) / portTICK_PERIOD_MS);
-                    wlan_interface.disconnect_power_off();
-                    wlan_interface.statistics.num_of_reconnect++;
-                    vTaskDelay((WIFI_PAUSE_BEFORE_RECONNECT_ATTEMPT_SEC * 1000) / portTICK_PERIOD_MS);
+
+                    if(ESP_OK == wlan_interface.init()){
+                        
+                        ESP_LOGI(NETWORK::Wlan::log_label, "WLAN interface init succesfull, config preloaded");
+                        wlan_interface.set_wlan_state(Wlan::wlan_state_t::inactive);
+                    }
+
+                    break;
                 }
-            } 
 
-            if(wlan_interface.scan_period_counter > (WIFI_NETWORK_STATISTICS_SCAN_PERIOD_SEC/WIFI_CONNECTION_CHECK_DELAY_SEC)){
-                if((wlan_interface.get_wlan_state() == Wlan::tWlanState::wlanState_initCompleted) || (wlan_interface.get_wlan_state() == Wlan::tWlanState::wlanState_connected)){
-                    esp_err_t res = ESP_OK; /*wlan_interface.fastScan();*/
+                case Wlan::wlan_state_t::inactive:
+                {
+                    /* if user config is required, start the AP here. */
+                    /* @TODO: */
 
-                    /* scan is a success. wait for next period */
-                    if(ESP_OK == res){
-                        wlan_interface.scan_period_counter = 0;
-                        /*wlan_interface.disconnect_power_off();*/
+                    if(Nvs_Manager::config_in_use != user_cfg_basic.rdy_for_update){
+                        wlan_interface.start_ap();
+                        user_cfg_http_server = start_webserver();
+                    }
+                    else
+                    {
+                        wlan_interface.wifi_trying_to_connect = 0;
+                        wlan_interface.sta_connect();
+                    }
+                   
+                    /* if STA connection is required, start sta connection process */
+
+                    
+                    /* When iface is started -> transition to wlan_state_t::sta_wait_for_connection;*/
+
+                    break;
+                }
+
+                case Wlan::wlan_state_t::sta_wait_for_connection:
+                {
+                    if(wlan_interface.wifi_trying_to_connect <= WIFI_CONNECTION_ATTEMPT_TIMEOUT_SEC)
+                    {
+                        wlan_interface.wifi_trying_to_connect += WIFI_CONNECTION_CHECK_DELAY_SEC;
+                    }
+                    else
+                    {
+                        wlan_interface.statistics.connection_ok_sec = 0;
+                        wlan_interface.wifi_trying_to_connect = 0;
+                        /* TODO: crude delay, can think of something smarter */
+                    
+                        ESP_LOGW(NETWORK::Wlan::log_label, "was unable to connect for: %d sec, will retry in: %d secs", WIFI_CONNECTION_ATTEMPT_TIMEOUT_SEC, WIFI_PAUSE_BEFORE_RECONNECT_ATTEMPT_SEC);
+                        vTaskDelay((1000) / portTICK_PERIOD_MS);
+                        wlan_interface.disconnect_power_off();
+                        wlan_interface.statistics.num_of_reconnect++;
+                        vTaskDelay((WIFI_PAUSE_BEFORE_RECONNECT_ATTEMPT_SEC * 1000) / portTICK_PERIOD_MS);
+                    }
+                    
+                    break;
+                }
+
+                case Wlan::wlan_state_t::sta_wait_for_ip:
+                {
+                    /* Waiting for IP, nothing to do */
+                    break;
+                }
+
+                case Wlan::wlan_state_t::sta_connection_ok:
+                case Wlan::wlan_state_t::sta_connection_stable:
+                {
+                    wlan_interface.statistics.connection_ok_sec += WIFI_CONNECTION_CHECK_DELAY_SEC;
+                    wlan_interface.wifi_trying_to_connect = 0;
+                    break;
+                }
+
+                case Wlan::wlan_state_t::ap_active:
+                {
+                    /* TODO: */
+                    break;
+                }
+
+                case Wlan::wlan_state_t::power_down:
+                {
+                    /* this is triggered from main thread, to power off wifi */
+                    wlan_interface.disconnect_power_off();
+                    break;
+                }
+
+                default:
+                {
+                    /* something's not right, I can feel it. */
+                    break;
+                }
+            }
+
+#ifdef NETWORK_SCAN_EN
+            /* if enabled, run promiscous network scan to see how crowded is the space */
+            if(wlan_interface.scan_period_counter < (WIFI_NETWORK_STATISTICS_SCAN_PERIOD_SEC/WIFI_CONNECTION_CHECK_DELAY_SEC))
+            {
+                wlan_interface.scan_period_counter++;
+            }
+            else
+            {
+                switch(((Wlan::wlan_state_t)wlan_interface.get_wlan_state()))
+                {
+                    case Wlan::wlan_state_t::inactive:
+                    case Wlan::wlan_state_t::sta_wait_for_ip:
+                    case Wlan::wlan_state_t::sta_connection_ok:
+                    case Wlan::wlan_state_t::sta_connection_stable:
+                    /*case Wlan::wlan_state_t::ap_active:*/
+                    {
+                        if(ESP_OK == wlan_interface.fastScan()){
+                            wlan_interface.scan_period_counter = 0;
+                            /*wlan_interface.disconnect_power_off();*/
+                        }
+
+                        break;
+                    }
+
+                    default:
+                    {
+                        break;
                     }
                 }
             }
-            else{
-                wlan_interface.scan_period_counter++;
-            }
+#endif /* NETWORK_SCAN_EN */
 
             /*xTaskResumeAll();*/
             Wlan::wifi_ext_task_inhibit_flag = false;
             vTaskDelay((WIFI_CONNECTION_CHECK_DELAY_SEC * 1000) / portTICK_PERIOD_MS);
             Wlan::wifi_ext_task_inhibit_flag = true;
-            vTaskDelay(1500 / portTICK_PERIOD_MS);
             // /*wifiIF.disconnect_power_off();
             // vTaskDelay(20000 / portTICK_PERIOD_MS);*/
             // wifiIF.begin();
