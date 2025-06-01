@@ -99,6 +99,24 @@
         "filesystem": "cpp",
         "__locale": "cpp",
         "shared_mutex": "cpp",
-        "__mutex_base": "cpp"
+        "__mutex_base": "cpp",
+        "*.ipp": "cpp",
+        "valarray": "cpp",
+        "__tree": "cpp",
+        "queue": "cpp",
+        "stack": "cpp",
+        "unordered_set": "cpp",
+        "typeindex": "cpp",
+        "__config": "cpp",
+        "strstream": "cpp",
+        "__functional_base": "cpp",
+        "__node_handle": "cpp",
+        "__memory": "cpp",
+        "locale": "cpp",
+        "esp_cpu_utils.h": "c",
+        "debug_helpers.c": "cpp",
+        "stdfloat": "cpp",
+        "*.inc": "cpp",
+        "__string": "cpp"
     }
 }

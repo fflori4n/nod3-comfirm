@@ -1,2 +1,5 @@
 set(SOURCES )
+include_directories($ENV{IDF_PATH}/components/xtensa/include/)
+include_directories($ENV{IDF_PATH}/components/esp_system/port/arch/xtensa/)
+include_directories($ENV{IDF_PATH}/components/esp_system/port/arch/)
 idf_component_register(SRCS "mcu_info.cpp" INCLUDE_DIRS . REQUIRES lwip)

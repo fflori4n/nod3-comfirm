@@ -151,8 +151,8 @@ class Microphone_input
             }
 
             //ESP_LOGI("FFT","%5.f Hz, mag raw: %0.2f, mag dB: %0.2f, filtered dB: %0.2f", (bin_band_hz * i) + (bin_band_hz/2), magnitude, magnitude_dB, filtered_magnitudes[i-1]);
-            //std::string bar ((uint16_t)filtered_magnitudes[i], '#');
-            //ESP_LOGI("FFT","%5.f Hz, mag %3.f : %s", (bin_band_hz * i) + (bin_band_hz/2), filtered_magnitudes[i], bar.c_str());
+            std::string bar ((uint16_t)filtered_magnitudes[i], '#');
+            ESP_LOGI("FFT","%5.f Hz, mag %3.f : %s", (bin_band_hz * i) + (bin_band_hz/2), filtered_magnitudes[i], bar.c_str());
         }
         ESP_LOGI("FFT", "dominant freq: %0.2f, dominant bin dB: %0.2f, average dB: %0.2f", dominant_frequency, dominant_freq_magnitude_db, average_magnitude_db);
 

@@ -43,21 +43,26 @@ class Sleep_manager{
         if((ESP_ERR_INVALID_STATE != time_status) && (ESP_FAIL != time_status)){
 
             if(0 != nv_last_deep_sleep_entered_exited_at_unix){
-                ESP_LOGW("NIGHTMAN", "woke up after: %lld seconds of deep sleep, setting current time as wake time", (mcu_time_now_unix - nv_last_deep_sleep_entered_exited_at_unix));
+                //ESP_LOGW("NIGHTMAN", "woke up after: %lld seconds of deep sleep, setting current time as wake time", (mcu_time_now_unix - nv_last_deep_sleep_entered_exited_at_unix));
             
                 nv_mcu_sleep_sec += (mcu_time_now_unix - nv_last_deep_sleep_entered_exited_at_unix);
                 nv_last_deep_sleep_entered_exited_at_unix = mcu_time_now_unix;
+
             }
             else{
 
-                ESP_LOGW("NIGHTMAN", "woke up after: [unknown] seconds of deep sleep, setting current time as wake time");
+                //ESP_LOGW("NIGHTMAN", "woke up after: [unknown] seconds of deep sleep, setting current time as wake time");
                 nv_last_deep_sleep_entered_exited_at_unix = mcu_time_now_unix;
+
+                return ESP_FAIL;
             }
             
         }
         else{
-            ESP_LOGW("NIGHTMAN", "woke up after [unknown] seconds of deep sleep");
+            //ESP_LOGW("NIGHTMAN", "woke up after [unknown] seconds of deep sleep");
             nv_last_deep_sleep_entered_exited_at_unix = 0;
+
+            return ESP_FAIL;
         }
 
         
@@ -79,12 +84,15 @@ class Sleep_manager{
         time_t mcu_time_now_unix = 0;
         esp_err_t time_status = Ntp_time::get_esp_rtc_time(mcu_time_now_unix);
 
+        
+
         if(0 != nv_last_deep_sleep_entered_exited_at_unix){
             ESP_LOGW("NIGHTMAN", "MCU was awake for: %lld seconds. Uptime logged.", (mcu_time_now_unix - nv_last_deep_sleep_entered_exited_at_unix));
-            nv_mcu_awake_sec += (mcu_time_now_unix - nv_last_deep_sleep_entered_exited_at_unix);
+            nv_mcu_awake_sec = mcu_time_now_unix - nv_last_deep_sleep_entered_exited_at_unix;
         }
-        else{
-            nv_last_deep_sleep_entered_exited_at_unix = mcu_time_now_unix;
+        else if(ESP_OK == time_status){
+            /* when there was no valid NTP time at last wake stup (after reset or poweron), deep sleep exited was set as 0. Now check if we have valid NTP time, and set last deep sleep exited retroactively */
+            nv_last_deep_sleep_entered_exited_at_unix = (mcu_time_now_unix - (esp_timer_get_time()/1000000));
         }
     }
 

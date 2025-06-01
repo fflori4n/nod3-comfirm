@@ -1,5 +1,39 @@
 #define pragma once
 
+#define ENABLE_COLOR_OUTPUT
+#ifdef ENABLE_COLOR_OUTPUT
+
+#define COLOR_WHITE "\x1b[37m"
+#define COLOR_CYAN "\x1b[36m"
+#define COLOR_PINK "\x1b[35m"
+#define COLOR_BLUE "\x1b[34m"
+#define COLOR_YELLOW "\x1b[33m"
+#define COLOR_GREEN "\x1b[32m"
+#define COLOR_RED "\x1b[31m"
+#define COLOR_GRAY "\x1b[30m"
+
+#define GREEN_OK COLOR_GREEN"OK"COLOR_WHITE
+#define RED_ER COLOR_RED"ER"COLOR_WHITE
+#define YELLOW_WR COLOR_YELLOW"WR"COLOR_WHITE
+
+#define RED_ERROR COLOR_RED"ERROR"COLOR_WHITE
+
+#else
+
+#define COLOR_WHITE ""
+#define COLOR_CYAN ""
+#define COLOR_PINK ""
+#define COLOR_BLUE ""
+#define COLOR_YELLOW ""
+#define COLOR_GREEN ""
+#define COLOR_RED ""
+#define COLOR_GRAY ""
+
+#define GREEN_OK "OK"
+#define RED_ER "ER"
+#define YELLOW_WR "WR"
+
+#endif /* ENABLE_COLOR_OUTPUT */
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -13,11 +47,21 @@
 /*#include "soc/adc_reg.h"*/
 #include "soc/system_reg.h"
 
+/*#include "../xtensa/include/esp_cpu_utils.h"*/
+/*#include "../esp_system/port/arch/xtensa/debug_helpers.c"*/
+
 #include "esp_chip_info.h"
-#include "esp_log.h"
-/*#include "esp_flash.h"*/
-#include "nvs_flash.h"
 #include "esp_system.h"
+#include "esp_log.h"
+#include "esp_log.h"
+#include "esp_types.h"
+#include "esp_attr.h"
+#include "esp_err.h"
+#include "esp_debug_helpers.h"
+#include "soc/soc_memory_layout.h"
+/*#include "esp_flash.h"*/
+#include "esp_debug_helpers.h"
+#include "nvs_flash.h"
 #include "esp_wifi_types.h"
 #include "esp_sleep.h"
 #include "esp_sntp.h"
@@ -26,7 +70,8 @@
 #include "esp_websocket_client.h"
 #include "esp_adc/adc_continuous.h"
 #include "esp_adc/adc_cali_scheme.h"
-/*#include "esp_websocket_client.h"*/
+#include "esp_http_server.h"
+
 #include "driver/temperature_sensor.h"
 
 /*#include "esp_adc_cal.h"*/
@@ -39,18 +84,23 @@
 #include <driver/i2c.h>
 #include <cmath>
 
+#include "utils/report_builder.h"
+#include "nvs_manager/nvs_manager.h"
 #include "ntp_time/ntp_time.cpp"
+#include "http_server/http_server.h"
 #include "network_manager/network_manager.cpp"
 /*#include "cron_scheduler/cron_scheduler.cpp"*/
-
+#include "ha_websocket/ha_websocket.cpp"
 #include "bmx280/bmx280.c"
+#include "ccs811/ccs811.cpp"
 #include "analogue_in/analogue_in.cpp"
 #include "sound_in_fft/sound_in_fft.cpp"
 #include "adc_periodic/adc_periodic.cpp"
-#include "ha_websocket/ha_websocket.cpp"
 #include "sleep_manager/sleep_manager.cpp"
 #include "mcu_info/mcu_info.cpp"
 #include "led_ws2812b/led_ws2812b.h"
+#include "digio_manager/digio.h"
+#include "as5600/as5600.h"
 
 
 
@@ -73,6 +123,9 @@ class bmx280_sensor{
 
 
     public:
+
+        static constexpr time_t report_cycle_time_sec{2 * 60};
+        time_t last_report_unix;
 
         static float calculateAbsoluteHumidity(float humidity, float temperature, float& current_water_mass_mgm3, float& saturation_water_mass_mgm3){
 
@@ -194,5 +247,25 @@ class bmx280_sensor{
             return ESP_FAIL;
         }
         return ESP_OK;
+    }
+
+    esp_err_t get_service_data_report(char *text_buffer, int16_t text_buffer_size){
+
+        Report_builder report;
+
+        report.add_float_report_item("bm0_temp", temperature, -40.0, 90.0);
+        report.add_float_report_item("bm0_rh", humidity, 0.0, 100.0);
+        report.add_float_report_item("bm0_atm", masl_pressure_mbar, 870.0, 1083.8);
+        report.add_float_report_item("bm0_ah", absolute_humidity, 0.0, 40.0);
+        report.add_float_report_item("bm0_satah", saturation_humidity, 0.0, 40.0);
+        
+        int16_t res = snprintf(text_buffer, text_buffer_size, "%s", report.get_service_data_buffer().c_str());
+
+        if ((res < 0) || (res >= text_buffer_size))
+        {
+            return ESP_FAIL;
+        }
+        return ESP_OK;
+
     }
 };

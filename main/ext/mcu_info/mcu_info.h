@@ -1,7 +1,15 @@
 #include <esp_system.h>
+#include <string>
+#include "save_backtrace.h"
 
 
 RTC_FAST_ATTR uint64_t nv_mcu_uptime_sec;
+
+/* this will increment on each PANIC or WAKE or this and that*/
+RTC_FAST_ATTR uint32_t reset_id_general_mem = 0;
+/* this will increment only in case of PANIC or in case RTC memory is cleared */
+RTC_FAST_ATTR uint32_t reset_id_rtcmem = 0;
+/* 00002334 */
 
 class MCUInfo{
 
@@ -9,19 +17,20 @@ class MCUInfo{
     static constexpr double currentConsumptionSleep{0.0};
     static constexpr char* log_label{"MCUINF"};
 
+public:
     const char* reset_reason_to_string(esp_reset_reason_t key)
     {
         constexpr std::array<std::pair<esp_reset_reason_t, const char *>, 16> reset_reason_str_map = {{
             {ESP_RST_UNKNOWN, "UNKNOWN"},
-            {ESP_RST_POWERON, "POWER_ON"},
+            {ESP_RST_POWERON, "POWER_ON"},/**/
             {ESP_RST_EXT, "EXTPIN"},
             {ESP_RST_SW, "ESP_RESTART"},
-            {ESP_RST_PANIC, "PANIC"},
+            {ESP_RST_PANIC, "PANIC"},/**/
             {ESP_RST_INT_WDT, "ISR_WDT"},
             {ESP_RST_TASK_WDT, "TASK_WDT"},
             {ESP_RST_WDT, "WDT"},
-            {ESP_RST_DEEPSLEEP, "WOKE_FR_DEEP_SLEEP"},
-            {ESP_RST_BROWNOUT, "BROWN_OUT"},
+            {ESP_RST_DEEPSLEEP, "WOKE_FR_DEEP_SLEEP"},/**/
+            {ESP_RST_BROWNOUT, "BROWN_OUT"},/**/
             {ESP_RST_SDIO, "SDIO"},
             {ESP_RST_USB, "USB"},
             {ESP_RST_JTAG, "JTAG"},
@@ -43,7 +52,7 @@ class MCUInfo{
 
     const char* wake_reason_to_string(esp_sleep_wakeup_cause_t key)
     {
-        constexpr std::array<std::pair<esp_sleep_wakeup_cause_t, const char *>, 13> wake_reason_str_map = {{
+        constexpr std::array<std::pair<esp_sleep_wakeup_cause_t, const char*>, 13> wake_reason_str_map = {{
             {ESP_SLEEP_WAKEUP_UNDEFINED,"UNDEFINED"},
             {ESP_SLEEP_WAKEUP_ALL,"UNDEFINED"},
             {ESP_SLEEP_WAKEUP_EXT0,"EXT0"},
@@ -82,11 +91,56 @@ class MCUInfo{
 
     uint64_t up_time_sec = nv_mcu_uptime_sec;
 
+    float bat_voltage;
+    float ldr_mcu;
+
     private:
 
     /* TODO:  esp_register_shutdown_handler()  seems cool*/
 
     public:
+
+        static constexpr int mission_start_year{2025};
+        static constexpr int mission_start_month{5};
+        static constexpr int mission_start_day{11};
+        /* SOL is sun dependant, but let's say it starts at the crack of dawn at 9am*/
+        static constexpr int mission_start_hour{9};
+        static constexpr int mission_start_min{0};
+        static constexpr int mission_start_sec{0};
+
+        static inline time_t mission_start_unix;
+        static inline uint32_t sol;
+
+        static uint32_t calculate_mission_sol(time_t& now_unix){
+
+            if(0 == mission_start_unix)
+            {
+                struct tm loc_time_tm;
+                localtime_r(&now_unix, &loc_time_tm);
+
+                loc_time_tm.tm_year = mission_start_year - 1900;
+                loc_time_tm.tm_mon = mission_start_month - 1;
+                loc_time_tm.tm_mday = mission_start_day;
+
+                loc_time_tm.tm_hour = mission_start_hour;
+                loc_time_tm.tm_min = mission_start_min;
+                loc_time_tm.tm_sec = mission_start_sec;
+
+                mission_start_unix = mktime(&loc_time_tm);
+
+                ESP_LOGI("SOL","Unix mission start %lld", mission_start_unix);
+
+            }
+
+            if(mission_start_unix > now_unix){
+                return 0;
+            }
+
+            
+            sol = (uint32_t)((now_unix - mission_start_unix) / (3600 * 24));
+            ESP_LOGI("SOL","%ld", sol);
+            return (uint32_t)((now_unix - mission_start_unix) / 3600);
+        }
 
     void printLog() { ESP_LOGI(log_label, "MCU INFO: ");};
 
@@ -101,7 +155,7 @@ class MCUInfo{
 
         if(false == chip_temp_sensor_inited){
             /* Read internal temp sensor */
-            ESP_LOGI(log_label, "Install temperature sensor, expected temp ranger range: 10~50 ℃");
+            /*ESP_LOGI(log_label, "Install temperature sensor, expected temp ranger range: 10~50 ℃");*/
             
             temperature_sensor_config_t temp_sensor_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(-10, 80);
             temperature_sensor_install(&temp_sensor_config, &temp_sensor);
@@ -112,19 +166,19 @@ class MCUInfo{
         float chip_temp = 0;
         chip_internal_temp_degc = 0;
 
-        for(int i = 0; i < 6; i++){
+        for(int i = 0; i < 20; i++){
             temperature_sensor_get_celsius(temp_sensor, &chip_temp);
             chip_internal_temp_degc += chip_temp;
         }
-        chip_internal_temp_degc/=6;
-        ESP_LOGI(log_label, "Chip internal temp: %.02f ℃", chip_internal_temp_degc);
+        chip_internal_temp_degc/=20;
+        /*ESP_LOGI(log_label, "Chip internal temp: %.02f ℃", chip_internal_temp_degc);*/
 
 
         /*up_time_sec = (esp_timer_get_time()/1000000);*/
        /* ESP_LOGI(log_label,"Uptime: %" PRIu64 " sec",up_time_sec);*/
 
-        ESP_LOGI(log_label,"Minimum heap size since wake up: %" PRIu32 " bytes", esp_get_minimum_free_heap_size());
-        ESP_LOGI(log_label,"Current heap size: %" PRIu32 " bytes", esp_get_free_internal_heap_size());
+        /*ESP_LOGI(log_label,"Minimum heap size since wake up: %" PRIu32 " bytes", esp_get_minimum_free_heap_size());
+        ESP_LOGI(log_label,"Current heap size: %" PRIu32 " bytes", esp_get_free_internal_heap_size());*/
 
         
 
@@ -137,6 +191,13 @@ class MCUInfo{
         /*ESP_LOGI(log_label,"ESP reset reason: %d", (uint16_t)lastWakeUpCause); */
         
         return ESP_OK;
+    }
+
+    void set_bat_voltage(float measured_bat_voltage){
+
+        bat_voltage = measured_bat_voltage;
+        ldr_mcu = 0;
+        return;
     }
 
     void print_detailed(){
@@ -170,7 +231,7 @@ RTC_FAST_ATTR uint64_t nv_mcu_awake_sec;*/
     esp_err_t get_service_data(char *text_buffer, int16_t text_buffer_size)
     {
 
-        static constexpr char *mcu_info_sensor_template = "\"mcu_tmreset\":%.2f, \"mcu_temp\":%.2f, \"mcu_rst\":\"%s\", \"mcu_awaketm\":%.2f, \"mcu_sleeptm\":%.2f";
+        static constexpr char *mcu_info_sensor_template = "\"mcu_tmreset\":%.2f, \"mcu_temp\":%.2f, \"mcu_rst\":\"%s\", \"mcu_awaketm\":%.2f, \"mcu_sleeptm\":%.2f, \"mcu_sol\":%ld";
 
         float uptime_hours = (nv_mcu_uptime_sec/60.0);
         ESP_LOGI("up time", "%.2f", uptime_hours);
@@ -179,7 +240,8 @@ RTC_FAST_ATTR uint64_t nv_mcu_awake_sec;*/
                                (float)(chip_internal_temp_degc),
                                reset_reason_to_string(esp_reset_reason()),
                                (float)(nv_mcu_awake_sec/3600.0),
-                               (float)(nv_mcu_sleep_sec/3600.0)
+                               (float)(nv_mcu_sleep_sec/3600.0),
+                               (uint32_t)(MCUInfo::sol)
                                );
 
         if ((res < 0) || (res >= text_buffer_size))
@@ -189,8 +251,39 @@ RTC_FAST_ATTR uint64_t nv_mcu_awake_sec;*/
         return ESP_OK;
     }
 
-   
-    
+    /* The same function as get service data basically, but it uses report builder to check bounds and check for other errors. */
+    esp_err_t get_service_data_report(char *text_buffer, int16_t text_buffer_size){
+
+        Report_builder report;
+
+        report.add_float_report_item("mcu_tmreset", (float)((nv_mcu_sleep_sec + nv_mcu_awake_sec)/3600.0), 0.0f, (100 * 365 * 24));
+        report.add_float_report_item("mcu_temp", (float)(chip_internal_temp_degc), -40.0f, 200.0f);
+        report.add_cstr_report_item("mcu_rst", reset_reason_to_string(esp_reset_reason()));
+        report.add_float_report_item("mcu_awaketm", (float)(nv_mcu_awake_sec/3600.0), 0.0f, (100 * 365 * 24));
+        report.add_float_report_item("mcu_sleeptm", (float)(nv_mcu_sleep_sec/3600.0), 0.0f, (100 * 365 * 24));
+        report.add_uint_report_item("mcu_sol", (uint32_t)(MCUInfo::sol), 0, (100 * 365));
+        /*report.add_uint_report_item("mcu_mem", (uint32_t)esp_get_free_internal_heap_size(), 0, 20000000);*/
+        report.add_uint_report_item("mcu_minmem", (uint32_t)esp_get_minimum_free_heap_size(), 0, 20000000);
+
+        report.add_uint_report_item("mcu_rstid", (uint32_t)(reset_id_general_mem), 0, (100 * 365));
+        report.add_uint_report_item("mcu_rtcrstid", (uint32_t)(reset_id_rtcmem), 0, (100 * 365));
+        report.add_float_report_item("mcu_batv", (float)(bat_voltage), -0.0f, 10.0f);
+        report.add_float_report_item("mcu_ldrv", (float)(ldr_mcu), -0.0f, 10.0f);
+        
+
+        int16_t res = snprintf(text_buffer, text_buffer_size, "%s", report.get_service_data_buffer().c_str());
+
+        if ((res < 0) || (res >= text_buffer_size))
+        {
+            return ESP_FAIL;
+        }
+        return ESP_OK;
+
+    }
+
+    static constexpr time_t report_cycle_time_sec{60 * 2};  /* only report if last report is older than 5 mins. */
+    time_t last_report_unix;
+
 
 };
 

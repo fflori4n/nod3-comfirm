@@ -5,12 +5,12 @@
 class Ntp_time{
 
     /*#define CONFIG_LWIP_SNTP_UPDATE_DELAY (60*1000)  update SMTP time automatically every $ milliseconds*/
-
-    static constexpr char* time_zone_tz_code{"CET-1CEST-2,M3.5.0/02:00:00,M10.5.0/03:00:00"};
-    static constexpr char* sntp_primary_server_url{"pool.ntp.org"};
+public:
+    static constexpr const char* time_zone_tz_code{"CET-1CEST-2,M3.5.0/02:00:00,M10.5.0/03:00:00"};
+    static constexpr const char* sntp_primary_server_url{"pool.ntp.org"};
     /*static constexpr char* sntp_backup_server_url{"pool.ntp.org"};*/
     static constexpr time_t unix_time_anno_domini{1723930276};
-    static constexpr uint32_t sntp_sync_interval_ms{5 * 60 * 1000};
+    static constexpr uint32_t sntp_sync_interval_ms{120 * 60 * 1000};
 
     
 
@@ -18,10 +18,11 @@ class Ntp_time{
     struct tm tmCurrentTime;
     char strftimeBuffer[64] = {'\0'};
 
-    public:
+    
         constexpr static char* log_label_time{"\x1b[95mTIME"};
         static RTC_FAST_ATTR time_t unixRTCTimeLastUpdatedAt;
         static time_t esp_uptime;
+        static inline uint32_t time_since_last_ntp_sync_sec;
 
     public:
         static esp_sntp_config_t sntp_config;
@@ -76,8 +77,11 @@ class Ntp_time{
             strftime(strftimeBuffer, sizeof(strftimeBuffer), "%c", &tmCurrentTime);
 
             ESP_LOGI(log_label_time, "MCU local time: %s", strftimeBuffer);
-            ESP_LOGI(log_label_time, "unix: %lld, status of RTC time: %s, last updated: %lld secs, next update due in: %lld", Ntp_time::unixTimeNow, rtc_time_state, (Ntp_time::unixTimeNow - Ntp_time::unixRTCTimeLastUpdatedAt),(sntp_sync_interval_ms/1000) - (Ntp_time::unixTimeNow - Ntp_time::unixRTCTimeLastUpdatedAt));
+            time_since_last_ntp_sync_sec = static_cast<uint32_t>(Ntp_time::unixTimeNow - Ntp_time::unixRTCTimeLastUpdatedAt);
+
+            ESP_LOGI(log_label_time, "unix: %lld, status of RTC time: %s, last updated: %ld secs, next update due in: %lld", Ntp_time::unixTimeNow, rtc_time_state,time_since_last_ntp_sync_sec,(sntp_sync_interval_ms/1000) - (Ntp_time::unixTimeNow - Ntp_time::unixRTCTimeLastUpdatedAt));
             
+
             localtime_r(&(Ntp_time::unixRTCTimeLastUpdatedAt), &tmCurrentTime);
             strftime(strftimeBuffer, sizeof(strftimeBuffer), "%c", &tmCurrentTime);
 

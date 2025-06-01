@@ -1,6 +1,7 @@
 idf_component_register(SRCS "main.cpp"
                     INCLUDE_DIRS lib ext
                     REQUIRES freertos 
+                    esp_system
                     esp_common 
                     esp_event
                     nvs_flash
@@ -9,4 +10,6 @@ idf_component_register(SRCS "main.cpp"
                     esp_netif
                     lwip
                     driver
-                    esp_adc)
+                    esp_adc
+                    esp_http_server
+                    )

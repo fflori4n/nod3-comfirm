@@ -19,3 +19,6 @@ else()
                     REQUIRES lwip esp-tls tcp_transport http_parser esp_event
                     PRIV_REQUIRES esp_timer)
 endif()
+include_directories($ENV{IDF_PATH}/components/xtensa/include/)
+include_directories($ENV{IDF_PATH}/components/esp_system/port/arch/xtensa/)
+include_directories($ENV{IDF_PATH}/components/esp_system/port/arch/)
