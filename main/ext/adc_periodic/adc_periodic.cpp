@@ -295,7 +295,8 @@ void task_adc_continous_measurement(void *parameters)
                         /* if channel index is somehow out of bounds, skip. */
                         if ((ADC_continous::adc_continous_sample_buffer[sample_index].type2.channel) > ADC_continous::adc_number_of_channels)
                         {
-                            ESP_LOGE("ADC", "detected sample with out of bounds channel.");
+                            /* TODO: starts throwing errorrs after soft reset, so I muted it for now.*/
+                            /*ESP_LOGE("ADC", "detected sample with out of bounds channel.");*/
                             continue;
                         }
 
@@ -410,8 +411,29 @@ void task_adc_continous_measurement(void *parameters)
 
                         case ADC_continous::ADC_CHANNEL_DC:
                         {
-                            /* @TODO: just do a quick DC baseline filtering.*/
-                            adc_ch.freq_measurement_Hz = 0;
+                            auto calculate_dc_measurement = [](ADC_continous::adc_continous_reading_t &adc_ch)
+                            {
+                                 adc_ch.freq_measurement_Hz = 0;
+
+                                /* take sample, add it to accumlator - to get multisampled ADC channel */
+                                adc_ch.measurement_accumlator += adc_ch.raw_adc; /* TODO: *8 should be also ok.*/
+                                adc_ch.num_of_multisamples++;
+
+                                /* ADC was multisampled, time to take new sample point */
+                                if (adc_ch.num_of_multisamples >= ADC_continous::adc_multisample_num)
+                                {
+                                    adc_ch.new_sample = (adc_ch.measurement_accumlator / adc_ch.num_of_multisamples);
+                                    adc_ch.num_of_samples++;
+
+                                    adc_ch.measurement_accumlator = 0;
+                                    adc_ch.num_of_multisamples = 0;
+
+                                    adc_ch.dc_base = ADC_continous::weighted_exp_filter((adc_ch.new_sample), adc_ch.dc_base, ADC_continous::filt_param_10000ms, 0.0f);
+                                }
+                            };
+
+                            calculate_dc_measurement(adc_ch);
+
                             continue;
                         }
                         break;
@@ -470,7 +492,7 @@ void task_adc_continous_measurement(void *parameters)
 
                                 adc_ch.power_factor_estimate = adc_ch.power_rms_mVA / adc_ch.power_pp_mVA;
 
-                                adc_ch.print();
+                                //adc_ch.print();
 
                                 adc_ch.signal_zero_cross = 0;
 
@@ -522,6 +544,14 @@ void task_adc_continous_measurement(void *parameters)
 
                                 ac_input.status = channel_sts;
                             }
+                            // else if(ADC_continous::ADC_CHANNEL_MICROPHONE_IN == adc_ch_cfg.channel_type){
+
+                            //     Microphone_input::process_buffer();
+                            // }
+                            // else if(ADC_continous::ADC_CHANNEL_DC == adc_ch_cfg.channel_type)
+                            // {
+                            //     ESP_LOGE("ADC", "raw: %0.2f DC voltage: %0.2f", adc_ch.dc_base, (adc_ch.dc_base * adc_ch_cfg.adc_to_voltage_v));
+                            // }
                         }
                         ADC_continous::fast_measurement_prescaler = 0;
                     }

@@ -157,6 +157,8 @@ public:
 public:
     
     const char *module_tag{"ADC_CONTINOUS"};
+    static constexpr time_t report_cycle_time_sec{2 * 60};
+    time_t last_report_unix;
     /* ADC continous ESP_IDF specific variables */
 
     static adc_continuous_ctx_t *adc_continous_driver_handle;
@@ -197,8 +199,14 @@ public:
     static DRAM_ATTR adc_continous_reading_t adc_measurements[adc_number_of_channels]; /* will static allocate memory for every possible channel even if only a few are used. to keep it simple*/
     
     static constexpr DRAM_ATTR channle_measurement_cfg_t adc_ch_measurement_cfg[adc_number_of_channels]{
-        {ADC_CHANNEL_DISABLED},
-        {ADC_CHANNEL_DISABLED},
+        {
+            .channel_type = ADC_CHANNEL_DC,
+            .adc_to_voltage_v = (5.00 / 40960),
+        },
+        {
+            .channel_type = ADC_CHANNEL_DC,
+            .adc_to_voltage_v = (4.02 / 27790),
+        },
         {ADC_CHANNEL_MICROPHONE_IN},
         {
             .channel_type = ADC_CHANNEL_AC_50Hz,
@@ -251,6 +259,7 @@ public:
     static constexpr float ac50Hz_dc_base_update_period_us{960.0f};
     static constexpr float filt_param_2ms{ac50Hz_dc_base_update_period_us/(ac50Hz_dc_base_update_period_us + 2000)};     /* 1/10 of a full period */
     static constexpr float filt_param_200ms{ac50Hz_dc_base_update_period_us/(ac50Hz_dc_base_update_period_us + 200000)}; /* 10 full periods */
+    static constexpr float filt_param_10000ms{ac50Hz_dc_base_update_period_us/(ac50Hz_dc_base_update_period_us + 10000000)}; /* 10 full periods */
 
     static constexpr float filt_param_measurement_period{1.0f / (2000.0f * 1000.0f / 20000.0f)};
     static constexpr float filt_param_adc_measurement_long_avg{(measurement_period_ms * 1.0f) / (sensor_transmission_refresh_sec * 1000.0f)};
@@ -333,10 +342,63 @@ public:
         return ESP_OK;
     }
 
+     /* The same function as get service data basically, but it uses report builder to check bounds and check for other errors. */
+    esp_err_t get_service_data_report(char* text_buffer, int16_t text_buffer_size, uint8_t adc_channel){
+
+        Report_builder report;
+        adc_ac_current_input_t &ac_input = ADC_continous::ac_input_measurements[adc_channel];
+
+        //\"ac%02d_cosfi\":%0.2f,\"ac%02d_v_p2p\":%0.2f,\"ac%02d_snr\":%0.2f";
+        report.add_cstr_report_item(std::format("ac{:02d}_status", adc_channel), ac_current_sts_str[(uint8_t)ac_input.status]);
+        report.add_float_report_item(std::format("ac{:02d}_freq", adc_channel), (float)(ac_input.frequency), 0.0f, 350.0f);
+
+        if( ac_input_status_t::E_no_freq != ac_input.status)
+        {
+            report.add_float_report_item(std::format("ac{:02d}_i_rms", adc_channel), (float)(ac_input.RMS_i_apperent_mA), (calc_min_i + 0.1f), (calc_max_i - 0.1f));
+            report.add_float_report_item(std::format("ac{:02d}_i_max", adc_channel), (float)(ac_input.RMS_i_max_mA), (calc_min_i + 0.1f), (calc_max_i - 0.1f));
+            report.add_float_report_item(std::format("ac{:02d}_i_min", adc_channel), (float)(ac_input.RMS_i_min_mA), (calc_min_i + 0.1f), (calc_max_i - 0.1f));
+
+            report.add_float_report_item(std::format("ac{:02d}_i_sine", adc_channel), (float)(ac_input.ideal_sine_i_mA), 0.1f, 60000.0f);
+
+            report.add_float_report_item(std::format("ac{:02d}_power_va", adc_channel), (float)(ac_input.RMS_power_VmA), 0.1f, 10000.0f);
+            report.add_float_report_item(std::format("ac{:02d}_cosfi", adc_channel), (float)(ac_input.power_factor_estimate), 0.0f, 1.2f);
+        }
+
+        report.add_float_report_item(std::format("ac{:02d}_v_p2p", adc_channel), (float)(ac_input.p2p_voltage), 0.0f, 5000.0f);
+        report.add_float_report_item(std::format("ac{:02d}_snr", adc_channel), (float)(ac_input.adc_signal_snr), 0.0f, 1000.0f);
+
+        int16_t res = snprintf(text_buffer, text_buffer_size, "%s", report.get_service_data_buffer().c_str());
+
+        /* reset the min and max values, starting new measurement tx period*/
+        ac_input.RMS_i_max_mA = calc_min_i;
+        ac_input.RMS_i_min_mA = calc_max_i;
+
+        if ((res < 0) || (res >= text_buffer_size))
+        {
+            return ESP_FAIL;
+        }
+        return ESP_OK;
+
+    }
+
+    float read_dc_voltage_on_channel(gpio_num_t gpio_num)
+    {
+
+        if ((gpio_num <= GPIO_NUM_NC) || (gpio_num >= GPIO_NUM_5))
+        {
+            return -1.0;
+        }
+
+        ESP_LOGI("DC_ANALOGIN","raw: %0.2f, physical: %0.2f", ADC_continous::adc_measurements[(uint8_t)gpio_num].dc_base, (ADC_continous::adc_measurements[(uint8_t)gpio_num].dc_base * ADC_continous::adc_ch_measurement_cfg[(uint8_t)gpio_num].adc_to_voltage_v));
+
+        return (ADC_continous::adc_measurements[(uint8_t)gpio_num].dc_base * ADC_continous::adc_ch_measurement_cfg[(uint8_t)gpio_num].adc_to_voltage_v);
+    }
+
     esp_err_t init_and_start(void);
     esp_err_t stop_adc_continous(void);
     esp_err_t reset_adc_continous(void);
     static esp_err_t pause_adc_continous(void);
     static esp_err_t start_adc_continous(void);
+
 };
 
