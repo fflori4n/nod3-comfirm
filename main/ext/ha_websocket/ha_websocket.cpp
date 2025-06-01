@@ -23,11 +23,16 @@ void Homeassistant_websocket::event_handler(void *handler_args, esp_event_base_t
   case WEBSOCKET_EVENT_DATA:
     {
    /*ESP_LOGI(ha_websoc_log_tag, "EVENT_DATA");*/
+
+    uint32_t data_cpy_len = data->data_len;
+    if(data_cpy_len > txrx_buffer_size){
+      data_cpy_len = txrx_buffer_size;
+    }
     
     websoc_rx_data.op_code = data->op_code;
     websoc_rx_data.data_len = data->data_len;
     memset(websoc_rx_data.rx_buffer, '\0', txrx_buffer_size);
-    snprintf(websoc_rx_data.rx_buffer, txrx_buffer_size, (char *)data->data_ptr);
+    snprintf(websoc_rx_data.rx_buffer, data_cpy_len, (char *)data->data_ptr);
     websoc_rx_data.processed = false;
     }
     break;
@@ -61,7 +66,7 @@ esp_err_t Homeassistant_websocket::waitForResponse(const char *positiveRespKey, 
     }
   }
 
-  ESP_LOGI(ha_websoc_log_tag, "RX:[%-12s |%4d bytes] %-17s, elapsed: %dms\nl-->:\x1b[0m%s\x1b[32m:<", op_code_dbg(websoc_rx_data.op_code), websoc_rx_data.data_len,dbgResultLabels[(result & 0x03)], (responseTime * poll_rx_buffer_ms), websoc_rx_data.rx_buffer);
+  ESP_LOGI(ha_websoc_log_tag, COLOR_GRAY"RX:[%-12s |%4d bytes] %-17s, elapsed: %dms\nl-->:"COLOR_WHITE"%s", op_code_dbg(websoc_rx_data.op_code), websoc_rx_data.data_len,dbgResultLabels[(result & 0x03)], (responseTime * poll_rx_buffer_ms), websoc_rx_data.rx_buffer);
 
   return result;
 }
@@ -239,19 +244,12 @@ esp_err_t Homeassistant_websocket::disconnect(void){
     return ESP_OK;
   }
 
- esp_err_t Homeassistant_websocket::send_text(char* tx_text, char* positive_response_key, char* negative_response_key, uint16_t response_timeout_ms = 500, uint8_t reattempt_send = 10, uint16_t pause_after_attempt = 1500){
+ esp_err_t Homeassistant_websocket::send_text(char* tx_text, char* positive_response_key, char* negative_response_key, uint16_t response_timeout_ms = 500, uint8_t reattempt_send = 3, uint16_t pause_after_attempt = 1500){
 
     esp_err_t res = ESP_ERR_TIMEOUT;
 
-    if(websoc_status_t::websoc_sts_connected_authed == socket_status){
-
-      /* construct the frame */
-      memset(rxtx_buffer, '\0', txrx_buffer_size);
-      /* TODO: check if str has %d and only one %d to add request id + check if text is longer than what buffer can accept*/
-      uint16_t len = snprintf(rxtx_buffer, txrx_buffer_size, tx_text, request_id);
-      /*ESP_LOGI(ha_websoc_log_tag, "READY TO SEND: %d bytes: %s",strlen(rxtx_buffer), rxtx_buffer);*/
-      request_id++;
-
+    if(websoc_status_t::websoc_sts_connected_authed == socket_status)
+    {
       for (uint16_t i = 0; ((res != ESP_OK) && (i < reattempt_send)); i++)
       {
 
@@ -272,8 +270,15 @@ esp_err_t Homeassistant_websocket::disconnect(void){
               continue;
           }
 
+          /* construct the frame */
+          memset(rxtx_buffer, '\0', txrx_buffer_size);
+          /* TODO: check if str has %d and only one %d to add request id + check if text is longer than what buffer can accept*/
+          uint16_t len = snprintf(rxtx_buffer, txrx_buffer_size, tx_text, request_id);
+          request_id++;
+          /*ESP_LOGI(ha_websoc_log_tag, "READY TO SEND: %d bytes: %s",strlen(rxtx_buffer), rxtx_buffer);*/
+
           int16_t result = esp_websocket_client_send_text(websoc_client_handle, rxtx_buffer, len, (50 / portTICK_PERIOD_MS));
-          ESP_LOGI(ha_websoc_log_tag, "TX:[%-12s |%4d/%4d bytes]\nl-<-:\x1b[0m%s\x1b[32m:-", op_code_dbg(1), result, strlen(rxtx_buffer), rxtx_buffer);
+          ESP_LOGI(ha_websoc_log_tag, COLOR_GRAY"TX:[%-12s |%4d/%4d bytes]\nl-<-:"COLOR_WHITE"%s", op_code_dbg(1), result, strlen(rxtx_buffer), rxtx_buffer);
 
           if(result >= 0){
             res = waitForResponse(positive_response_key, negative_response_key, response_timeout_ms);
