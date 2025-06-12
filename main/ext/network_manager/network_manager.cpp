@@ -341,14 +341,14 @@ void Wlan::_wifiEventHandler(void *event_handler_arg, esp_event_base_t event_bas
                 case WIFI_EVENT_AP_STACONNECTED:
                 {
                     wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
-                    ESP_LOGI(NETWORK::Wlan::log_label, "station "MACSTR" join, AID=%d", MAC2STR(event->mac), event->aid);
+                    ESP_LOGI(NETWORK::Wlan::network_async_tag, "station "MACSTR" join, AID=%d", MAC2STR(event->mac), event->aid);
                     break;
                 }
 
                 case WIFI_EVENT_AP_STADISCONNECTED:
                 {
                     wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
-                    ESP_LOGI(NETWORK::Wlan::log_label, "station "MACSTR" leave, AID=%d, reason=%d", MAC2STR(event->mac), event->aid, event->reason);
+                    ESP_LOGI(NETWORK::Wlan::network_async_tag, "station "MACSTR" leave, AID=%d, reason=%d", MAC2STR(event->mac), event->aid, event->reason);
                     break;
                 }
 
@@ -360,7 +360,7 @@ void Wlan::_wifiEventHandler(void *event_handler_arg, esp_event_base_t event_bas
         }
         else
         {
-            ESP_LOGE(NETWORK::Wlan::log_label, "wlan event cannot lock wifi driver");
+            ESP_LOGE(NETWORK::Wlan::network_async_tag, "wlan event cannot lock wifi driver");
             return;
         }
 
@@ -369,28 +369,28 @@ void Wlan::_wifiEventHandler(void *event_handler_arg, esp_event_base_t event_bas
         if(IP_EVENT == event_base){
             const ip_event_t event_type{static_cast<ip_event_t>(event_id)};
 
-            ESP_LOGI(NETWORK::Wlan::log_label, "IP_EVENT::%s", ip_event_to_string(event_type));
+            ESP_LOGI(NETWORK::Wlan::network_async_tag, "IP_EVENT::%s", ip_event_to_string(event_type));
         }
         else if(WIFI_EVENT == event_base){
             const wifi_event_t event_type{static_cast<wifi_event_t>(event_id)};
 
-            ESP_LOGI(NETWORK::Wlan::log_label, "WIFI_EVENT::%s", wifi_event_to_string(event_type));
+            ESP_LOGI(NETWORK::Wlan::network_async_tag, "WIFI_EVENT::%s", wifi_event_to_string(event_type));
 
             /* on disconnect event:*/
             if(event_type == WIFI_EVENT_STA_DISCONNECTED){
                 wifi_event_sta_disconnected_t* disconnect_event_data = static_cast<wifi_event_sta_disconnected_t*>(event_data);
-                ESP_LOGI(NETWORK::Wlan::log_label, "EVENT_DATA::%d, %d", disconnect_event_data->rssi, disconnect_event_data->reason);
+                ESP_LOGI(NETWORK::Wlan::network_async_tag, "EVENT_DATA::%d, %d", disconnect_event_data->rssi, disconnect_event_data->reason);
             }
             
         }
         else{
-            ESP_LOGW(NETWORK::Wlan::log_label, "unexpected event type: %s", event_base);
+            ESP_LOGW(NETWORK::Wlan::network_async_tag, "unexpected event type: %s", event_base);
         }
     }
     else
     {
 
-        ESP_LOGW(NETWORK::Wlan::log_label, "wlan event dropped. handler busy based on mutex");
+        ESP_LOGW(NETWORK::Wlan::network_async_tag, "wlan event dropped. handler busy based on mutex");
         return;
     }
 }
@@ -875,7 +875,7 @@ void task_wlan_manager(void *parameters){
         constexpr uint16_t WIFI_PAUSE_BEFORE_RECONNECT_ATTEMPT_SEC{20};
         constexpr uint16_t WIFI_NETWORK_STATISTICS_SCAN_PERIOD_SEC{60};
 
-        ESP_LOGI(NETWORK::Wlan::log_label, "wifi iface manage start");
+        ESP_LOGI(NETWORK::Wlan::network_tag, "wifi iface manage start");
         wlan_interface.loadMACAddress();
 
         /*wlan_interface.statistics.connection_ok_sec = 0;*/
@@ -894,7 +894,7 @@ void task_wlan_manager(void *parameters){
 
                     if(ESP_OK == wlan_interface.init()){
                         
-                        ESP_LOGI(NETWORK::Wlan::log_label, "WLAN interface init succesfull, config preloaded");
+                        ESP_LOGI(NETWORK::Wlan::network_tag, "WLAN interface init succesfull, config preloaded");
                         wlan_interface.set_wlan_state(Wlan::wlan_state_t::inactive);
                     }
 
@@ -936,7 +936,7 @@ void task_wlan_manager(void *parameters){
                         wlan_interface.wifi_trying_to_connect = 0;
                         /* TODO: crude delay, can think of something smarter */
                     
-                        ESP_LOGW(NETWORK::Wlan::log_label, "was unable to connect for: %d sec, will retry in: %d secs", WIFI_CONNECTION_ATTEMPT_TIMEOUT_SEC, WIFI_PAUSE_BEFORE_RECONNECT_ATTEMPT_SEC);
+                        ESP_LOGW(NETWORK::Wlan::network_tag, "was unable to connect for: %d sec, will retry in: %d secs", WIFI_CONNECTION_ATTEMPT_TIMEOUT_SEC, WIFI_PAUSE_BEFORE_RECONNECT_ATTEMPT_SEC);
                         vTaskDelay((1000) / portTICK_PERIOD_MS);
                         wlan_interface.disconnect_power_off();
                         wlan_interface.statistics.num_of_reconnect++;
@@ -980,6 +980,7 @@ void task_wlan_manager(void *parameters){
                 }
             }
 
+/*#define NETWORK_SCAN_EN*/
 #ifdef NETWORK_SCAN_EN
             /* if enabled, run promiscous network scan to see how crowded is the space */
             if(wlan_interface.scan_period_counter < (WIFI_NETWORK_STATISTICS_SCAN_PERIOD_SEC/WIFI_CONNECTION_CHECK_DELAY_SEC))

@@ -1,6 +1,8 @@
 #include <esp_system.h>
 #include <string>
 #include "save_backtrace.h"
+#include <string>
+#include <esp_wifi.h>
 
 
 RTC_FAST_ATTR uint64_t nv_mcu_uptime_sec;
@@ -10,6 +12,7 @@ RTC_FAST_ATTR uint32_t reset_id_general_mem = 0;
 /* this will increment only in case of PANIC or in case RTC memory is cleared */
 RTC_FAST_ATTR uint32_t reset_id_rtcmem = 0;
 /* 00002334 */
+uint32_t maximum_free_heep_size = 0;
 
 class MCUInfo{
 
@@ -100,47 +103,47 @@ public:
 
     public:
 
-        static constexpr int mission_start_year{2025};
-        static constexpr int mission_start_month{5};
-        static constexpr int mission_start_day{11};
-        /* SOL is sun dependant, but let's say it starts at the crack of dawn at 9am*/
-        static constexpr int mission_start_hour{9};
-        static constexpr int mission_start_min{0};
-        static constexpr int mission_start_sec{0};
+        // static constexpr int mission_start_year{2025};
+        // static constexpr int mission_start_month{6};
+        // static constexpr int mission_start_day{5};
+        // /* SOL is sun dependant, but let's say it starts at the crack of dawn at 9am*/
+        // static constexpr int mission_start_hour{9};
+        // static constexpr int mission_start_min{0};
+        // static constexpr int mission_start_sec{0};
 
-        static inline time_t mission_start_unix;
-        static inline uint32_t sol;
+        // static inline time_t mission_start_unix;
+        // static inline uint32_t sol;
 
-        static uint32_t calculate_mission_sol(time_t& now_unix){
+        // static uint32_t calculate_mission_sol(time_t& now_unix){
 
-            if(0 == mission_start_unix)
-            {
-                struct tm loc_time_tm;
-                localtime_r(&now_unix, &loc_time_tm);
+        //     if(0 == mission_start_unix)
+        //     {
+        //         struct tm loc_time_tm;
+        //         localtime_r(&now_unix, &loc_time_tm);
 
-                loc_time_tm.tm_year = mission_start_year - 1900;
-                loc_time_tm.tm_mon = mission_start_month - 1;
-                loc_time_tm.tm_mday = mission_start_day;
+        //         loc_time_tm.tm_year = mission_start_year - 1900;
+        //         loc_time_tm.tm_mon = mission_start_month - 1;
+        //         loc_time_tm.tm_mday = mission_start_day;
 
-                loc_time_tm.tm_hour = mission_start_hour;
-                loc_time_tm.tm_min = mission_start_min;
-                loc_time_tm.tm_sec = mission_start_sec;
+        //         loc_time_tm.tm_hour = mission_start_hour;
+        //         loc_time_tm.tm_min = mission_start_min;
+        //         loc_time_tm.tm_sec = mission_start_sec;
 
-                mission_start_unix = mktime(&loc_time_tm);
+        //         mission_start_unix = mktime(&loc_time_tm);
 
-                ESP_LOGI("SOL","Unix mission start %lld", mission_start_unix);
+        //         ESP_LOGI("SOL","Unix mission start %lld", mission_start_unix);
 
-            }
+        //     }
 
-            if(mission_start_unix > now_unix){
-                return 0;
-            }
+        //     if(mission_start_unix > now_unix){
+        //         return 0;
+        //     }
 
             
-            sol = (uint32_t)((now_unix - mission_start_unix) / (3600 * 24));
-            ESP_LOGI("SOL","%ld", sol);
-            return (uint32_t)((now_unix - mission_start_unix) / 3600);
-        }
+        //     sol = (uint32_t)((now_unix - mission_start_unix) / (3600 * 24));
+        //     ESP_LOGI("SOL","%ld", sol);
+        //     return (uint32_t)((now_unix - mission_start_unix) / 3600);
+        // }
 
     void printLog() { ESP_LOGI(log_label, "MCU INFO: ");};
 
@@ -171,25 +174,7 @@ public:
             chip_internal_temp_degc += chip_temp;
         }
         chip_internal_temp_degc/=20;
-        /*ESP_LOGI(log_label, "Chip internal temp: %.02f ℃", chip_internal_temp_degc);*/
 
-
-        /*up_time_sec = (esp_timer_get_time()/1000000);*/
-       /* ESP_LOGI(log_label,"Uptime: %" PRIu64 " sec",up_time_sec);*/
-
-        /*ESP_LOGI(log_label,"Minimum heap size since wake up: %" PRIu32 " bytes", esp_get_minimum_free_heap_size());
-        ESP_LOGI(log_label,"Current heap size: %" PRIu32 " bytes", esp_get_free_internal_heap_size());*/
-
-        
-
-        
-
-       /*lastResetCause = esp_reset_reason();*/
-      /*printf("%s", reset_reason_to_string(lastResetCause));*/
-        /*lastWakeUpCause = esp_sleep_get_wakeup_cause();*/
-      /*  printf("%s", "hello");*/
-        /*ESP_LOGI(log_label,"ESP reset reason: %d", (uint16_t)lastWakeUpCause); */
-        
         return ESP_OK;
     }
 
@@ -220,6 +205,23 @@ public:
 
     }
 
+    std::string get_mac_string(wifi_interface_t type_of_mac, uint8_t number_of_bytes = 6, char spacer = ':'){
+
+        /* ESP_MAC_WIFI_STA, ESP_MAC_EFUSE_FACTORY */
+        uint8_t mac_address[6] = {};
+        esp_err_t res = esp_wifi_get_mac(type_of_mac, mac_address);
+        ESP_LOGI("helo","%s",esp_err_to_name(res));
+        char str_buffer[12 + 5 + 1] = {'\0'};
+
+        snprintf(str_buffer, (12 + 5 + 1), "%02X:%02X:%02X:%02X:%02X:%02X", mac_address[5], mac_address[4], mac_address[3], mac_address[2], mac_address[1], mac_address[0]);
+
+        ESP_LOGI("helo","%s",str_buffer);
+        return std::string(str_buffer);
+    }
+
+    inline static float get_maximum_heep_used_percent(){return (100.0 - (((float)esp_get_free_heap_size()/ (float)maximum_free_heep_size) * 100.0));}
+    
+
     inline int16_t get_fraction(float value)
     {
         return (abs(((int16_t)(value * 100)) % 100));
@@ -241,7 +243,7 @@ RTC_FAST_ATTR uint64_t nv_mcu_awake_sec;*/
                                reset_reason_to_string(esp_reset_reason()),
                                (float)(nv_mcu_awake_sec/3600.0),
                                (float)(nv_mcu_sleep_sec/3600.0),
-                               (uint32_t)(MCUInfo::sol)
+                               (uint32_t)(Ntp_time::get_sol())
                                );
 
         if ((res < 0) || (res >= text_buffer_size))
@@ -261,7 +263,7 @@ RTC_FAST_ATTR uint64_t nv_mcu_awake_sec;*/
         report.add_cstr_report_item("mcu_rst", reset_reason_to_string(esp_reset_reason()));
         report.add_float_report_item("mcu_awaketm", (float)(nv_mcu_awake_sec/3600.0), 0.0f, (100 * 365 * 24));
         report.add_float_report_item("mcu_sleeptm", (float)(nv_mcu_sleep_sec/3600.0), 0.0f, (100 * 365 * 24));
-        report.add_uint_report_item("mcu_sol", (uint32_t)(MCUInfo::sol), 0, (100 * 365));
+        report.add_uint_report_item("mcu_sol", (uint32_t)(Ntp_time::get_sol()), 0, (100 * 365));
         /*report.add_uint_report_item("mcu_mem", (uint32_t)esp_get_free_internal_heap_size(), 0, 20000000);*/
         report.add_uint_report_item("mcu_minmem", (uint32_t)esp_get_minimum_free_heap_size(), 0, 20000000);
 

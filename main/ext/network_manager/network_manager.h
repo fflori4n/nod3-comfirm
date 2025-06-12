@@ -30,6 +30,10 @@ namespace NETWORK
 
         public:
 
+            constexpr static char* network_tag{COLOR_BLUE "NETWORK" COLOR_WHITE};
+            constexpr static char* net_scan_tag{COLOR_BLUE "NET_SCAN" COLOR_WHITE};
+            constexpr static char* network_async_tag{COLOR_CYAN "NETWORK_ASINC" COLOR_WHITE};
+
             enum class wlan_state_t
             {
                 waiting_init,
@@ -249,6 +253,7 @@ namespace NETWORK
             static wifi_power_save_e wifi_power_save_mode;
             constexpr static char* log_label{"\x1b[34mNETWORK"};
             constexpr static char* log_label_scan{"\x1b[34mSCAN"};
+
             static uint64_t macAddress;
             uint32_t wifi_connected_sec;
             uint32_t wifi_trying_to_connect;

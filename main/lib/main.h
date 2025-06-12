@@ -121,6 +121,8 @@ class bmx280_sensor{
         static constexpr float meters_above_see_level{80};
         float masl_pressure_compensation_factor = pow((1.0 - ((0.0065 * meters_above_see_level)/(288.15 + (0.0065 * meters_above_see_level)))),5.257);   /*TODO: constexpr*/
 
+        bool i2c_error = false;
+
 
     public:
 
@@ -166,20 +168,29 @@ class bmx280_sensor{
 
 
 
-    esp_err_t begin(i2c_port_t i2c_port, const char* sensor_prefix, float sensor_calibration_offset){
+    esp_err_t begin(i2c_port_t& i2c_port, const char* sensor_prefix, float sensor_calibration_offset){
 
         esp_err_t res = ESP_OK;
 
-        sensor_calibration_offset = sensor_calibration_offset;
-        sensor_prefix = sensor_prefix;
+        /*if(i2c_port < I2C_NUM_MAX)
+        {*/
+            i2c_error = false;
+            sensor_calibration_offset = sensor_calibration_offset;
+            sensor_prefix = sensor_prefix;
+            bmx280_sens_pointer = bmx280_create(i2c_port);
 
-        bmx280_sens_pointer = bmx280_create(i2c_port);
-
-        if(bmx280_sens_pointer){
-            
-            res |= bmx280_init(bmx280_sens_pointer);
-            res |= bmx280_configure(bmx280_sens_pointer, &bmx_sensor_cfg);
-        }
+            if(bmx280_sens_pointer)
+            {
+                res |= bmx280_init(bmx280_sens_pointer);
+                res |= bmx280_configure(bmx280_sens_pointer, &bmx_sensor_cfg);
+            }
+        /*}
+        else
+        {
+            ESP_LOGE("bme280","i2c port is non-usable");
+            i2c_error = true;
+            res = ESP_FAIL;
+        }*/
 
         return res;
     }
@@ -207,10 +218,9 @@ class bmx280_sensor{
         ESP_LOGI("bme290","slave addr:%x",bmx280_sens_pointer->slave);
         ESP_LOGI("bme290","chip:%x",bmx280_sens_pointer->chip_id);
 
-        time_t rtc_now;
-        Ntp_time::get_esp_rtc_time(rtc_now);
-
-        
+        auto [rtc_now, time_reliability, mcu_time_tm] = Ntp_time::evaluate_mcu_rtc();
+        (void)mcu_time_tm;
+          
         double dHumi = ((humidity - prev_humidity) * 60) / (rtc_now - last_reading);
         double dTemp = ((temperature - prev_temperature) * 60) / (rtc_now - last_reading);
 

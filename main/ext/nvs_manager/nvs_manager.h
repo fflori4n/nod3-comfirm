@@ -139,7 +139,8 @@ esp_err_t save_user_config(void){
         user_cfg_basic.device_name,
         user_cfg_basic.websoc_endpoint_url);
     }
-    else{
+    else
+    {
         ESP_LOGI(Nvs_Manager::log_label_nvs,"failed to set user cfg");
     }
 

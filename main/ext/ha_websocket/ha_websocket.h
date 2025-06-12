@@ -5,7 +5,7 @@
 static constexpr uint16_t txrx_buffer_size{2048};
 static char rxtx_buffer[txrx_buffer_size];
 
-#define WEBSOC_SENSOR_NAME "testsens"
+#define WEBSOC_SENSOR_NAME "test_3nod_confirm"
 
 typedef struct {
     int data_len;    
@@ -49,7 +49,7 @@ private:
 
   static constexpr uint16_t poll_rx_buffer_ms{10};
 
-  static constexpr const char *const dbgResultLabels[] = {COLOR_GREEN"POSITIVE Response"COLOR_GRAY, COLOR_RED"NEGATIVE Response"COLOR_GRAY, COLOR_RED"TIMEOUT"COLOR_GRAY, COLOR_RED"ERROR"COLOR_GRAY};
+  static constexpr const char *const dbgResultLabels[] = {"Response "COLOR_GREEN"OK"COLOR_GRAY, "Response "COLOR_RED"NEGATIVE"COLOR_GRAY, COLOR_RED"TIMEOUT"COLOR_GRAY, COLOR_RED"ERROR"COLOR_GRAY};
 
 public:
   esp_websocket_client_config_t websocket_cfg = {};

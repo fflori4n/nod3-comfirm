@@ -8,6 +8,7 @@
 #include <inttypes.h>
 #include "sdkconfig.h"
 #include "lib/main.h"
+#include <esp_wifi.h>
 
 esp_chip_info_t mcu_type_information;
 
@@ -17,15 +18,18 @@ MCUInfo mcu_info;
 Sleep_manager night_man;
 AS5600 hall_angle_sensor;
 
+esp_err_t i2c_num0_init_result = ESP_FAIL;
+
 Digio_pin wind_hall(GPIO_NUM_4);
 Digio_pin rain_hall(GPIO_NUM_3);
-
-
 
 bmx280_sensor ambient_bme280;
 /*ADC_input current_transformer_pin(ADC_UNIT_1,ADC_CHANNEL_4);*/
 /*ADC_input ldr_resistor(ADC_UNIT_1,ADC_CHANNEL_4);*/
 Homeassistant_websocket ha_websoc;
+
+/* ID of active I2C interface, it will be I2C_NUM_MAX if port is not initialized or not usable for some reason */
+i2c_port_t i2c_driver_I2C0 = I2C_NUM_MAX;
 
 char msg[2048];
 char mqtt_service_data_buffer[2048] = {};
@@ -49,6 +53,8 @@ extern "C" void app_main(void)
     /*ESP_LOGI("MAIN","APPLICATION CODE STARTED.");*/
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+    maximum_free_heep_size = esp_get_free_heap_size();
 
     
     
@@ -105,55 +111,59 @@ esp_err_t Main::init(void){
     ESP_LOGW(sys_up_tag, COLOR_YELLOW "**** **** **** **** **** **** **** ****");
     ESP_LOGW(sys_up_tag, "RST: %s", mcu_info.reset_reason_to_string(esp_reset_reason()));
 
-    if(ESP_OK == wake_tm_sts)
-    {
-        time_t mcu_time_now_unix = 0;
-        esp_err_t time_status = Ntp_time::get_esp_rtc_time(mcu_time_now_unix);
-        ESP_LOGW(sys_up_tag, "     WOKE: after %lld seconds of deep sleep", (mcu_time_now_unix - nv_last_deep_sleep_entered_exited_at_unix));
-    }
-    else
-    {
-        ESP_LOGW(sys_up_tag, "     WOKE: after [ ? ] seconds of deep sleep");
-    }
-
     esp_chip_info(&mcu_type_information);
     mcu_info.load_session_nonchanging();
     mcu_info.update_mcu_telemetry();
 
-    ESP_LOGW(sys_up_tag, "MCU: INFO:");
-    ESP_LOGW(sys_up_tag, "     TYPE: %s rev v%d.%d, with %d cores",CONFIG_IDF_TARGET,(mcu_type_information.revision / 100),(mcu_type_information.revision % 100), mcu_type_information.cores);
-    ESP_LOGW(sys_up_tag, "     FEATURES: %s%s%s%s",
+    ESP_LOGW(sys_up_tag, "MCU:\tINFO:");
+    ESP_LOGW(sys_up_tag, "\tTYPE: %s rev v%d.%d, with %d cores",CONFIG_IDF_TARGET,(mcu_type_information.revision / 100),(mcu_type_information.revision % 100), mcu_type_information.cores);
+    ESP_LOGW(sys_up_tag, "\tFEATURES: %s%s%s%s",
                 (mcu_type_information.features & CHIP_FEATURE_WIFI_BGN) ? "WiFi/" : "",
                  (mcu_type_information.features & CHIP_FEATURE_BT) ? "BT" : "",
                  (mcu_type_information.features & CHIP_FEATURE_BLE) ? "BLE" : "",
                  (mcu_type_information.features & CHIP_FEATURE_IEEE802154) ? ", 802.15.4 (Zigbee/Thread)" : "");
+    uint8_t mac_address[6] = {'\0'};
+    esp_wifi_get_mac((wifi_interface_t)ESP_MAC_BASE, mac_address); // Or esp_read_mac() if you need to specify the interface
+    ESP_LOGW(sys_up_tag, "\tWLAN MAC: %02X:%02X:%02X:%02X:%02X:%02X", mac_address[0], mac_address[1], mac_address[2], mac_address[3], mac_address[4], mac_address[5]);
+    esp_wifi_get_mac((wifi_interface_t)ESP_MAC_EFUSE_FACTORY, mac_address); // Or esp_read_mac() if you need to specify the interface
+    ESP_LOGW(sys_up_tag, "\tFACTORY MAC: %02X:%02X:%02X:%02X:%02X:%02X", mac_address[0], mac_address[1], mac_address[2], mac_address[3], mac_address[4], mac_address[5]);
+    ESP_LOGW(sys_up_tag, "\tMCU TEMP: %0.2f °C", mcu_info.chip_internal_temp_degc);
+    ESP_LOGW(sys_up_tag, "\tMaximum available heep: %lld bytes", maximum_free_heep_size);
+    ESP_LOGW(sys_up_tag, "\tCurrent heep: %0.2f%, %lld bytes", 100.0 - (((float)esp_get_free_heap_size()/ (float)maximum_free_heep_size) * 100.0), esp_get_free_heap_size());
+    ESP_LOGW(sys_up_tag, "\tMaximum heep use: %0.2f%, %lld bytes", 100.0 - (((float)esp_get_minimum_free_heap_size()/ (float)maximum_free_heep_size) * 100.0), esp_get_minimum_free_heap_size());
 
-                 
-    //ESP_LOGW("SYS-UP", "     GIT: %s", GIT_COMMIT_HASH);
-    ESP_LOGW(sys_up_tag, "     MCU TEMP: %0.2f °C", mcu_info.chip_internal_temp_degc);
-    ESP_LOGW(sys_up_tag, "     Current heep: %lld bytes", esp_get_free_internal_heap_size());
-    ESP_LOGW(sys_up_tag, "     Minimum heep sinc wake: %lld bytes", esp_get_minimum_free_heap_size());
+    auto [mcu_time_unix, time_reliability, mcu_time_tm] = ntpTime.evaluate_mcu_rtc();
+    (void)mcu_time_tm;
 
-    ESP_LOGW(sys_up_tag, "RTC: UNIX: %lld", Ntp_time::unixTimeNow);
-    ESP_LOGW(sys_up_tag, "     LAST SYNC: %lld", (0u != Ntp_time::time_since_last_ntp_sync_sec) ? (Ntp_time::time_since_last_ntp_sync_sec/60) : (-1));
-    ESP_LOGW(sys_up_tag, "     NEXT SYNC: %lld", ((Ntp_time::sntp_sync_interval_ms/1000) - (Ntp_time::unixTimeNow - Ntp_time::unixRTCTimeLastUpdatedAt))/60);
+    // ESP_LOGW(sys_up_tag, "RTC:\tUNIX: %lld", Ntp_time::rtc_current_time_unix);
+    // ESP_LOGW(sys_up_tag, "\tLAST SYNC: %lld", (0u != Ntp_time::time_since_last_ntp_sync_sec) ? (Ntp_time::time_since_last_ntp_sync_sec/60) : (-1));
+    // ESP_LOGW(sys_up_tag, "\tNEXT SYNC: %lld", ((Ntp_time::sntp_sync_interval_ms/1000) - (Ntp_time::rtc_current_time_unix - Ntp_time::rtc_last_updated_at_unix))/60);
+
+    if(ESP_OK == wake_tm_sts)
+    {
+        ESP_LOGW(sys_up_tag, "\tWOKE: after %lld seconds of deep sleep", (mcu_time_unix - nv_last_deep_sleep_entered_exited_at_unix));
+    }
+    else
+    {
+        ESP_LOGW(sys_up_tag, "\tWOKE: after [ ? ] seconds of deep sleep");
+    }
 
     esp_err_t nvs_open_res = nvs_open("storage", NVS_READWRITE, &(Nvs_Manager::nvs_handle));
     esp_err_t ucfg_critical_presence = load_user_config();
-    ESP_LOGW(sys_up_tag, "NVS: OPEN_RW: %s", ((ESP_OK == nvs_open_res) ? GREEN_OK : "ER"));
-    ESP_LOGW(sys_up_tag, "     ucfg_critical read: %s", (ESP_OK == ucfg_critical_presence) ? "FOUND" : "NO CONFIG FOUND");
-    ESP_LOGW(sys_up_tag, "     >SSID: %s", user_cfg_basic.ssid);
-    ESP_LOGW(sys_up_tag, "     >PASS: %s", user_cfg_basic.passwd);
-    ESP_LOGW(sys_up_tag, "     >SENS: %s", user_cfg_basic.device_name);
-    ESP_LOGW(sys_up_tag, "     >WSOC: %s", user_cfg_basic.websoc_endpoint_url);
+    ESP_LOGW(sys_up_tag, "NVS:\tOPEN_RW: %s", ((ESP_OK == nvs_open_res) ? GREEN_OK : "ER"));
+    ESP_LOGW(sys_up_tag, "\tucfg_critical read: %s", (ESP_OK == ucfg_critical_presence) ? "FOUND" : "NO CONFIG FOUND");
+    ESP_LOGW(sys_up_tag, "\t>SSID: %s", user_cfg_basic.ssid);
+    ESP_LOGW(sys_up_tag, "\t>PASS: %s", user_cfg_basic.passwd);
+    ESP_LOGW(sys_up_tag, "\t>SENS: %s", user_cfg_basic.device_name);
+    ESP_LOGW(sys_up_tag, "\t>WSOC: %s", user_cfg_basic.websoc_endpoint_url);
 
     esp_err_t mcu_long_stat_presence = Nvs_Manager::get_nvs("mcu_long_stat", (void*)(&mcu_long_term_stats), sizeof(mcu_long_term_stat_t));
-    ESP_LOGW(sys_up_tag, "     mcu_long_stat read: %s", ((ESP_OK == mcu_long_stat_presence) ? "FOUND" : "NOT FOUND"));
-    ESP_LOGW(sys_up_tag, "     >PROG REFASH: %ld", mcu_long_term_stats.num_of_program_flash);
-    ESP_LOGW(sys_up_tag, "     >SW RESET: %ld", mcu_long_term_stats.num_of_esp_swreset);
-    ESP_LOGW(sys_up_tag, "     >SLEEP WAKE: %ld", mcu_long_term_stats.num_of_esp_sleep_wake);
-    ESP_LOGW(sys_up_tag, "     >TOTAL UPTIME: %lld", mcu_long_term_stats.total_recorded_uptime_sec);
-    ESP_LOGW(sys_up_tag, "     >TOTAL SLEEP TIME: %lld", mcu_long_term_stats.total_recorded_sleep_sec);
+    ESP_LOGW(sys_up_tag, "\tmcu_long_stat read: %s", ((ESP_OK == mcu_long_stat_presence) ? "FOUND" : "NOT FOUND"));
+    ESP_LOGW(sys_up_tag, "\t>PROG REFASH: %ld", mcu_long_term_stats.num_of_program_flash);
+    ESP_LOGW(sys_up_tag, "\t>SW RESET: %ld", mcu_long_term_stats.num_of_esp_swreset);
+    ESP_LOGW(sys_up_tag, "\t>SLEEP WAKE: %ld", mcu_long_term_stats.num_of_esp_sleep_wake);
+    ESP_LOGW(sys_up_tag, "\t>TOTAL UPTIME: %lld", mcu_long_term_stats.total_recorded_uptime_sec);
+    ESP_LOGW(sys_up_tag, "\t>TOTAL SLEEP TIME: %lld", mcu_long_term_stats.total_recorded_sleep_sec);
 
 
     if(ESP_RST_USB == esp_reset_reason()){
@@ -162,7 +172,6 @@ esp_err_t Main::init(void){
 
     /* shutdown handler will run before every SWRESET*/
     esp_register_shutdown_handler(at_shutdown);
-    //mcu_info.print_detailed();
     
     /* evaluate BOOT button, if it is pressed, clear 'ucfg_critical' reset and enter http configuration mode */
     ESP_LOGI(usr_cfg_tag, "Press boot button (GPIO_NUM_9) to clear config and restart.");
@@ -196,88 +205,102 @@ esp_err_t Main::init(void){
     /*current_transformer_pin.configure(ADC_WIDTH_BIT_12, 1u);*/
     /*ldr_resistor.configure(ADC_WIDTH_BIT_12, 1u);*/
 
-    
+    auto init_i2c = [&](gpio_num_t sda, gpio_num_t scl, bool pullup_en) -> esp_err_t{
+
+        esp_err_t res = ESP_OK;
+        i2c_driver_I2C0 = I2C_NUM_MAX;
+        /* Config for I2C bus */
+        constexpr i2c_config_t i2c_cfg{
+            .mode = I2C_MODE_MASTER,
+            .sda_io_num = GPIO_NUM_8,
+            .scl_io_num = GPIO_NUM_9,
+            .sda_pullup_en = false,
+            .scl_pullup_en = false,
+            .master = {
+                .clk_speed = 100000
+                }
+            };
+
+            ESP_LOGI(i2c_tag, "Initializing I2C_NUM_%d module, on pins: SDA: GPIO_NUM_%d, SCL: GPIO_NUM_%d", I2C_NUM_0, i2c_cfg.sda_io_num, i2c_cfg.scl_io_num);
+        /* first check if SDA and SCL have pullup */
+
+        /* configure SDA and SCL as high Z, to check if pullups are present */
+        gpio_config_t sda_scl_floating_in_conf = {
+            .pin_bit_mask = (1ULL << i2c_cfg.sda_io_num | 1ULL << i2c_cfg.scl_io_num),
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE
+        };
+        gpio_config(&sda_scl_floating_in_conf);
+
+        uint8_t sda_gpio_level = gpio_get_level((gpio_num_t)i2c_cfg.sda_io_num);
+        uint8_t scl_gpio_level = gpio_get_level((gpio_num_t)i2c_cfg.scl_io_num);
+        ESP_LOGE(i2c_tag, "Checking GPIO pullups: SDA: %s, SCL: %s", ((1u == sda_gpio_level) ? GREEN_OK : RED_ER), ((1u == scl_gpio_level) ? GREEN_OK : RED_ER));
+
+        if((0u != sda_gpio_level) && (0u != scl_gpio_level))
+        {
+            if(ESP_OK == i2c_param_config(I2C_NUM_0, &i2c_cfg))
+            {
+                if(ESP_OK != i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0))
+                {
+                    res = ESP_OK;
+                    i2c_driver_I2C0 = I2C_NUM_0;
+                }
+                else
+                {
+                    ESP_LOGE("I2C_INIT", "driver install failed");
+                    res = ESP_FAIL;
+                }
+            }
+            else
+            {
+                ESP_LOGE("I2C_INIT", "failed to set I2C config");
+                res = ESP_FAIL;
+            }
+        }
+        else
+        {
+            res = ESP_FAIL;
+        }
+                    
+        return res;
+    };
     /* initializing I2C port */
 
-    /* Config for I2C bus */
-    constexpr i2c_config_t i2c_cfg{
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = GPIO_NUM_8,
-        .scl_io_num = GPIO_NUM_9,
-        .sda_pullup_en = false,
-        .scl_pullup_en = false,
-        .master = {
-            .clk_speed = 100000}};
-
-    ESP_LOGI(i2c_tag, "Initializing I2C_NUM_%d module, on pins: SDA: GPIO_NUM_%d, SCL: GPIO_NUM_%d", I2C_NUM_0, i2c_cfg.sda_io_num, i2c_cfg.scl_io_num);
-    /* first check if SDA and SCL have pullup */
-
-    /* configure SDA and SCL as high Z, to check if pullups are present */
-    gpio_config_t sda_scl_floating_in_conf = {
-        .pin_bit_mask = (1ULL << i2c_cfg.sda_io_num | 1ULL << i2c_cfg.scl_io_num),
-        .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE
-    };
-    gpio_config(&sda_scl_floating_in_conf);
-
-    uint8_t sda_gpio_level = gpio_get_level((gpio_num_t)i2c_cfg.sda_io_num);
-    uint8_t scl_gpio_level = gpio_get_level((gpio_num_t)i2c_cfg.scl_io_num);
-    
-    if((0u != sda_gpio_level) && (0u != scl_gpio_level))
-    {
-        ESP_LOGI(i2c_tag, "Checking GPIO pullups: SDA: %s, SCL: %s", ((1u == sda_gpio_level) ? GREEN_OK : RED_ER), ((1u == scl_gpio_level) ? GREEN_OK : RED_ER));
-
-        if(ESP_OK != i2c_param_config(I2C_NUM_0, &i2c_cfg))
-        {
-            ESP_LOGE("I2C_INIT", "failed to set I2C config");
-        }
-        if(ESP_OK != i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0))
-        {
-            ESP_LOGE("I2C_INIT", "driver install failed");
-        }
-    }
-    else
-    {
-        ESP_LOGE(i2c_tag, "Checking GPIO pullups: SDA: %s, SCL: %s", ((1u == sda_gpio_level) ? GREEN_OK : RED_ER), ((1u == scl_gpio_level) ? GREEN_OK : RED_ER));
-    }
-
-
-
-    ambient_bme280.begin(I2C_NUM_0, "BMX0", 19.0);
-    ccs811_sensor.begin(I2C_NUM_0, 0x5A);
-    hall_angle_sensor.begin(I2C_NUM_0, 0x36);
-    
-    
+    i2c_num0_init_result = init_i2c(GPIO_NUM_8, GPIO_NUM_9, false);
 
     constexpr uint32_t sntp_sync_seconds{30*60*1000};
-    
     ntpTime.sntp_init("pool.ntp.org", 10000, sntp_sync_seconds);
-
     vTaskDelay(1000/portTICK_PERIOD_MS);
 
-    ccs811_init_sensor(&ccs811_mox_sensor);
-    //ccs811_sensor.init();
-    hall_angle_sensor.init();
+    if(ESP_OK == i2c_num0_init_result)
+    {
+        ambient_bme280.begin(i2c_driver_I2C0, "BMX0", 19.0);
+        ccs811_sensor.begin(i2c_driver_I2C0, 0x5A);
+        hall_angle_sensor.begin(i2c_driver_I2C0, 0x36);
+        ccs811_init_sensor(&ccs811_mox_sensor);
+        //ccs811_sensor.init();
+        hall_angle_sensor.init();
 
-    gpio_reset_pin(GPIO_NUM_7);
-    gpio_set_direction(GPIO_NUM_7, GPIO_MODE_OUTPUT);
-    gpio_set_level(GPIO_NUM_7, true);
+        gpio_reset_pin(GPIO_NUM_7);
+        gpio_set_direction(GPIO_NUM_7, GPIO_MODE_OUTPUT);
+        gpio_set_level(GPIO_NUM_7, true);
 
-    gpio_config_t io_conf = {
-        .pin_bit_mask = (1ULL << GPIO_NUM_4),
-        .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_DISABLE,
-        .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE
-    };
-    gpio_config(&io_conf);
+        gpio_config_t io_conf = {
+            .pin_bit_mask = (1ULL << GPIO_NUM_4),
+            .mode = GPIO_MODE_INPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE
+        };
+        gpio_config(&io_conf);
 
     
-    wind_hall.configure_as_frequency_input();
-    rain_hall.configure_as_frequency_input();
-    hall_angle_sensor.init();
+        wind_hall.configure_as_frequency_input();
+        rain_hall.configure_as_frequency_input();
+        hall_angle_sensor.init();
+    }
 
     return (esp_err_t)ESP_OK;
 }
@@ -287,34 +310,35 @@ bool rdy_to_report = false;
 
 void Main::loop(void){
 
-    time_t rtcTime;
-    struct tm now_tm;
-    esp_err_t res = ntpTime.get_esp_rtc_time(rtcTime);
-    localtime_r(&rtcTime, &now_tm);
+    auto [mcu_time_unix, time_reliability, now_tm] = Ntp_time::evaluate_mcu_rtc();
+
+    if(ESP_OK == i2c_num0_init_result)
+    {
+        //float hall_voltage = continous_adc_manager.read_dc_voltage_on_channel(GPIO_NUM_4);
+        //int hall_voltage = gpio_get_level(GPIO_NUM_4);
+        //ESP_LOGI("hall:", "DC voltage: %d", hall_voltage);
+        //vTaskDelay(50/portTICK_PERIOD_MS);
+        ambient_bme280.read();
+        hall_angle_sensor.read_wind_angle();
     
-    //float hall_voltage = continous_adc_manager.read_dc_voltage_on_channel(GPIO_NUM_4);
-    //int hall_voltage = gpio_get_level(GPIO_NUM_4);
-    //ESP_LOGI("hall:", "DC voltage: %d", hall_voltage);
-    //vTaskDelay(50/portTICK_PERIOD_MS);
-    ambient_bme280.read();
-    hall_angle_sensor.read_wind_angle();
+
+        //ESP_LOGI("rpmHall"," high/low [%lld:%lld] %0.2f, lowhigh ratio: %0.2f", raw_pulse_high_us/1000, raw_pulse_low_us/1000, 1000000.0/((raw_pulse_high_us) + (raw_pulse_low_us)), (1.0 * raw_pulse_low_us)/(1.0 * raw_pulse_high_us));
+        wind_hall.dbgPrint();
+        rain_hall.dbgPrint();
+        //vTaskDelay(100/portTICK_PERIOD_MS);
+
+        //return;
+
+        /*ambient_bme280.read();
+        ccs811_sensor.set_baseline_ambient(ambient_bme280.temperature, ambient_bme280.humidity, 0xFFFF);
+        ccs811_sensor.read_measurement();*/
+    }
     
-
-    //ESP_LOGI("rpmHall"," high/low [%lld:%lld] %0.2f, lowhigh ratio: %0.2f", raw_pulse_high_us/1000, raw_pulse_low_us/1000, 1000000.0/((raw_pulse_high_us) + (raw_pulse_low_us)), (1.0 * raw_pulse_low_us)/(1.0 * raw_pulse_high_us));
-    wind_hall.dbgPrint();
-    rain_hall.dbgPrint();
-    //vTaskDelay(100/portTICK_PERIOD_MS);
-
-    //return;
-
-    /*ambient_bme280.read();
-    ccs811_sensor.set_baseline_ambient(ambient_bme280.temperature, ambient_bme280.humidity, 0xFFFF);
-    ccs811_sensor.read_measurement();*/
     
     mcu_info.update_mcu_telemetry();
     mcu_info.set_bat_voltage(continous_adc_manager.read_dc_voltage_on_channel(GPIO_NUM_1));
 
-    time_t last_full_minute_unix = (rtcTime - (time_t)now_tm.tm_sec);
+    time_t last_full_minute_unix = (mcu_time_unix - (time_t)now_tm.tm_sec);
     rdy_to_report |= ((ESP_OK == Homeassistant_websocket::sensor_report_period_rdy(last_full_minute_unix, last_report_send_period, 60)) ? true : false);
 
     if(0 == reset_id_rtcmem){
@@ -323,19 +347,18 @@ void Main::loop(void){
         reset_id_rtcmem += 10000 * (uint16_t)(now_tm.tm_hour);
     }
 
-    ESP_LOGI("reset_id", "%d:%d", (reset_id_rtcmem), (reset_id_general_mem));
+    //ESP_LOGI("reset_id", "%d:%d", (reset_id_rtcmem), (reset_id_general_mem));
 
-    if ((ESP_OK == res) || (ESP_ERR_INVALID_VERSION == res))
+    if ((Ntp_time::rtc_time_sts_t::Not_synced_usable == time_reliability) || (Ntp_time::rtc_time_sts_t::OK == time_reliability))
     {
+        Ntp_time::get_sol();
         /* if time is not ok, postpone send until there is valid time to use */
         if (true == rdy_to_report)
         {
-            MCUInfo::calculate_mission_sol(rtcTime);
-
-            esp_err_t mcu_info_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(rtcTime, mcu_info.last_report_unix, MCUInfo::report_cycle_time_sec, false);
-            esp_err_t network_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(rtcTime, wlan_interface.last_report_unix, NETWORK::Wlan::report_cycle_time_sec, false);
-            esp_err_t bmx_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(rtcTime, ambient_bme280.last_report_unix, bmx280_sensor::report_cycle_time_sec, false);
-            esp_err_t ac_input_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(rtcTime, continous_adc_manager.last_report_unix, ADC_continous::report_cycle_time_sec, false);
+            esp_err_t mcu_info_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(mcu_time_unix, mcu_info.last_report_unix, MCUInfo::report_cycle_time_sec, false);
+            esp_err_t network_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(mcu_time_unix, wlan_interface.last_report_unix, NETWORK::Wlan::report_cycle_time_sec, false);
+            esp_err_t bmx_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(mcu_time_unix, ambient_bme280.last_report_unix, bmx280_sensor::report_cycle_time_sec, false);
+            esp_err_t ac_input_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(mcu_time_unix, continous_adc_manager.last_report_unix, ADC_continous::report_cycle_time_sec, false);
 
             if ((ESP_OK == mcu_info_report_rdy) || (ESP_OK == network_report_rdy) || (ESP_OK == bmx_report_rdy) || (ESP_OK == ac_input_report_rdy))
             {
@@ -358,7 +381,7 @@ void Main::loop(void){
                         report_sent = ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
                         
                         if(ESP_OK == report_sent){
-                            mcu_info.last_report_unix = rtcTime;
+                            mcu_info.last_report_unix = mcu_time_unix;
                         }
                     }
 
@@ -370,7 +393,7 @@ void Main::loop(void){
                         report_sent = ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
 
                         if(ESP_OK == report_sent){
-                            wlan_interface.last_report_unix = rtcTime;
+                            wlan_interface.last_report_unix = mcu_time_unix;
                         }
                     }
 
@@ -382,7 +405,7 @@ void Main::loop(void){
                         report_sent = ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
 
                         if(ESP_OK == report_sent){
-                            ambient_bme280.last_report_unix = rtcTime;
+                            ambient_bme280.last_report_unix = mcu_time_unix;
                         }
                     }
 
@@ -401,7 +424,7 @@ void Main::loop(void){
                         //report_sent = ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
 
                         if(ESP_OK == report_sent){
-                            continous_adc_manager.last_report_unix = rtcTime;
+                            continous_adc_manager.last_report_unix = mcu_time_unix;
                         }
                     }
 
@@ -421,7 +444,9 @@ void Main::loop(void){
 
 
                     ESP_LOGI("hello", "awake vs sleep seconds: %lld : %lld", nv_mcu_awake_sec, nv_mcu_sleep_sec);
-                    //night_man.schedule_rtc_wakeup(10000);
+
+                    //night_man.update_awake_time();
+                    //night_man.schedule_rtc_wakeup(30000);
                     //night_man.enter_deep_sleep();
                 }
                 ha_websoc.disconnect();
@@ -442,8 +467,8 @@ void Main::loop(void){
 
     night_man.update_awake_time();
 
-    wlan_interface.get_service_data(mqtt_service_data_buffer, 2048);
-    ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
+    // wlan_interface.get_service_data(mqtt_service_data_buffer, 2048);
+    // ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
 
     //esp_backtrace_print(32);
     /*log_backtrace_to_rtcmem();*/

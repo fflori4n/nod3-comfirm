@@ -1,69 +1,15 @@
 #include "ntp_time.h"
 
 esp_sntp_config_t Ntp_time::sntp_config = ESP_NETIF_SNTP_DEFAULT_CONFIG(sntp_primary_server_url);
-time_t Ntp_time::unixTimeNow{time(nullptr)};
+time_t Ntp_time::rtc_current_time_unix{time(nullptr)};
 time_t Ntp_time::esp_uptime{0};
-time_t Ntp_time::unixRTCTimeLastUpdatedAt{time(nullptr)};
 
 Ntp_time::Ntp_time(void){
 
-    time(&unixTimeNow);
+    time(&rtc_current_time_unix);
     setenv("TZ", time_zone_tz_code, 1);
     tzset();
 }
-
-// esp_err_t Ntp_time::evaluate_rtc_time_validity(time_t& unix_time){
-
-//     /* NOTE: ESP32 NTP client blocks sync for 15sec after update/recieving response from server */
-
-//     if((Ntp_time::unixRTCTimeLastUpdatedAt > unix_time) || (Ntp_time::unix_time_anno_domini >= unix_time))
-//     {
-//         ESP_LOGW("TIME", "Time invalid, needs update: %lld", unix_time);
-//         return ESP_FAIL;
-//     }
-//    /* ESP_LOGI("TIME", "Unix: %lld, last updated: %lld", Ntp_time::unixTimeNow,Ntp_time::unixRTCTimeLastUpdatedAt);*/
-//     return ESP_OK;
-// }
-
-// esp_err_t Ntp_time::rtc_time_check(){
-//     time(&(Ntp_time::unixTimeNow));
-//     return Ntp_time::evaluate_rtc_time_validity(Ntp_time::unixTimeNow);
-// }
-
-// time_t Ntp_time::get_esp_rtc_time(){
-
-//     time(&(Ntp_time::unixTimeNow));
-//     ESP_LOGI("TIME", "Unix: %lld", Ntp_time::unixTimeNow);
-
-//     return Ntp_time::unixTimeNow;
-// }
-
-// time_t Ntp_time::get_valid_esp_rtc_time(){
-
-//     time(&(Ntp_time::unixTimeNow));
-//     if(ESP_OK == evaluate_rtc_time_validity(Ntp_time::unixTimeNow)){
-//         return Ntp_time::unixTimeNow;
-//     }
-
-//     return (time_t)0;
-// }
-
-// void Ntp_time::print_current_time(){
-
-//     time_t unix_time;
-//     get_esp_rtc_time(unix_time);
-
-//     char strftimeBuffer[64] = {'\0'};
-//     struct tm tmCurrentTime;
-
-//     localtime_r(&unix_time, &tmCurrentTime);
-//     strftime(strftimeBuffer, sizeof(strftimeBuffer), "%c", &tmCurrentTime);
-
-//     ESP_LOGI("RTC", "mcu thinks local time is: %s", strftimeBuffer);
-//     ESP_LOGI("RTC", "unix: %lld, RTC time is: %s, last update: %lld secs, next update due in: %lld", unix_time, ((ESP_OK == evaluate_rtc_time_validity(unix_time)) ? "usable" : "not usable"), (Ntp_time::unixTimeNow - Ntp_time::unixRTCTimeLastUpdatedAt), (sntp_sync_interval_ms/1000) - (Ntp_time::unixTimeNow - Ntp_time::unixRTCTimeLastUpdatedAt));
-
-//     return;
-// }
 
 void Ntp_time::print_time(time_t& unix_time){
 
@@ -75,21 +21,20 @@ void Ntp_time::print_time(time_t& unix_time){
 
 void time_sync_notification_cb(struct timeval *tv)
 {
-    
-   
 
+    auto [new_rtc_update_time, time_reliability, mcu_time_tm] = Ntp_time::evaluate_mcu_rtc();
+    (void)mcu_time_tm;
 
-    time_t new_rtc_update_time = 0;
-    esp_err_t time_state = Ntp_time::get_esp_rtc_time(new_rtc_update_time);
-    if((ESP_ERR_INVALID_STATE != time_state) && (ESP_FAIL != time_state)){
-        Ntp_time::unixRTCTimeLastUpdatedAt = new_rtc_update_time;
+    if(Ntp_time::rtc_time_sts_t::OK == time_reliability)
+    {
+        Ntp_time::rtc_last_updated_at_unix = new_rtc_update_time;
         ESP_LOGI(Ntp_time::log_label_time, "EVENT: TIME SYNC: OK");
     }
-    else{
+    else
+    {
         ESP_LOGW(Ntp_time::log_label_time, "EVENT: TIME SYNC: FAIL");
     }
 
-    
     return;
 }
 /* NOTE: for some external source sync e.g. GNSS use:
