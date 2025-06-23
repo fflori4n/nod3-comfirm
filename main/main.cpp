@@ -23,7 +23,8 @@ esp_err_t i2c_num0_init_result = ESP_FAIL;
 Digio_pin wind_hall(GPIO_NUM_4);
 Digio_pin rain_hall(GPIO_NUM_3);
 
-bmx280_sensor ambient_bme280;
+bmx280_sensor tail_bmx280;
+bmx280_sensor onboard_bmx280;
 /*ADC_input current_transformer_pin(ADC_UNIT_1,ADC_CHANNEL_4);*/
 /*ADC_input ldr_resistor(ADC_UNIT_1,ADC_CHANNEL_4);*/
 Homeassistant_websocket ha_websoc;
@@ -186,6 +187,21 @@ esp_err_t Main::init(void){
         esp_restart();
     }
 
+    /* set GPIO config and powerkey */
+    gpio_config_t io_conf = {
+    .pin_bit_mask = (1ULL << GPIO_NUM_5) | (1ULL << GPIO_NUM_6) | (1ULL << GPIO_NUM_7),
+    .mode = GPIO_MODE_OUTPUT,
+    .pull_up_en = GPIO_PULLUP_DISABLE,
+    .pull_down_en = GPIO_PULLDOWN_DISABLE,
+    .intr_type = GPIO_INTR_DISABLE
+  };
+  gpio_config(&io_conf);
+
+  // 2. Set the GPIO pin to HIGH (1)
+  gpio_set_level(GPIO_NUM_7, 1);
+  gpio_set_level(GPIO_NUM_6, 1);
+  gpio_set_level(GPIO_NUM_5, 1);
+
     /* Init Network manager task */
     xTaskCreatePinnedToCore( NETWORK::task_wlan_manager, "manage_network", 5000, (void*)1, 7, NULL, 0);
 
@@ -210,6 +226,23 @@ esp_err_t Main::init(void){
         esp_err_t res = ESP_OK;
         i2c_driver_I2C0 = I2C_NUM_MAX;
         /* Config for I2C bus */
+        
+        /* first check if SDA and SCL have pullup */
+
+        /* configure SDA and SCL as high Z, to check if pullups are present */
+        gpio_config_t sda_scl_floating_in_conf = {
+            .pin_bit_mask = (1ULL << GPIO_NUM_8 | 1ULL << GPIO_NUM_9),
+            .mode = GPIO_MODE_INPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE
+        };
+        gpio_config(&sda_scl_floating_in_conf);
+
+        uint8_t sda_gpio_level = gpio_get_level((gpio_num_t)GPIO_NUM_8);
+        uint8_t scl_gpio_level = gpio_get_level((gpio_num_t)GPIO_NUM_9);
+        ESP_LOGI(i2c_tag, "Checking GPIO pullups: SDA: %s, SCL: %s", ((1u == sda_gpio_level) ? GREEN_OK : RED_ER), ((1u == scl_gpio_level) ? GREEN_OK : RED_ER));
+
         constexpr i2c_config_t i2c_cfg{
             .mode = I2C_MODE_MASTER,
             .sda_io_num = GPIO_NUM_8,
@@ -221,42 +254,27 @@ esp_err_t Main::init(void){
                 }
             };
 
-            ESP_LOGI(i2c_tag, "Initializing I2C_NUM_%d module, on pins: SDA: GPIO_NUM_%d, SCL: GPIO_NUM_%d", I2C_NUM_0, i2c_cfg.sda_io_num, i2c_cfg.scl_io_num);
-        /* first check if SDA and SCL have pullup */
-
-        /* configure SDA and SCL as high Z, to check if pullups are present */
-        gpio_config_t sda_scl_floating_in_conf = {
-            .pin_bit_mask = (1ULL << i2c_cfg.sda_io_num | 1ULL << i2c_cfg.scl_io_num),
-            .mode = GPIO_MODE_OUTPUT,
-            .pull_up_en = GPIO_PULLUP_DISABLE,
-            .pull_down_en = GPIO_PULLDOWN_DISABLE,
-            .intr_type = GPIO_INTR_DISABLE
-        };
-        gpio_config(&sda_scl_floating_in_conf);
-
-        uint8_t sda_gpio_level = gpio_get_level((gpio_num_t)i2c_cfg.sda_io_num);
-        uint8_t scl_gpio_level = gpio_get_level((gpio_num_t)i2c_cfg.scl_io_num);
-        ESP_LOGE(i2c_tag, "Checking GPIO pullups: SDA: %s, SCL: %s", ((1u == sda_gpio_level) ? GREEN_OK : RED_ER), ((1u == scl_gpio_level) ? GREEN_OK : RED_ER));
+        ESP_LOGI(i2c_tag, "Initializing I2C_NUM_%d module, on pins: SDA: GPIO_NUM_%d, SCL: GPIO_NUM_%d", I2C_NUM_0, GPIO_NUM_8, GPIO_NUM_9);
 
         if((0u != sda_gpio_level) && (0u != scl_gpio_level))
         {
-            if(ESP_OK == i2c_param_config(I2C_NUM_0, &i2c_cfg))
+
+            res = i2c_param_config(I2C_NUM_0, &i2c_cfg);
+            if(ESP_OK == res)
             {
-                if(ESP_OK != i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0))
+                res = i2c_driver_install(I2C_NUM_0, I2C_MODE_MASTER, 0, 0, 0);
+                if(ESP_OK == res)
                 {
-                    res = ESP_OK;
                     i2c_driver_I2C0 = I2C_NUM_0;
                 }
                 else
                 {
-                    ESP_LOGE("I2C_INIT", "driver install failed");
-                    res = ESP_FAIL;
+                    ESP_LOGE("I2C_INIT", "Driver install failed: %s", esp_err_to_name(res));
                 }
             }
             else
             {
-                ESP_LOGE("I2C_INIT", "failed to set I2C config");
-                res = ESP_FAIL;
+                ESP_LOGE("I2C_INIT", "Failed to set I2C config: %s", esp_err_to_name(res));
             }
         }
         else
@@ -276,13 +294,14 @@ esp_err_t Main::init(void){
 
     if(ESP_OK == i2c_num0_init_result)
     {
-        ambient_bme280.begin(i2c_driver_I2C0, "BMX0", 19.0);
+        tail_bmx280.begin(i2c_driver_I2C0, 0x77, "BMX0", 19.0);
+        onboard_bmx280.begin(i2c_driver_I2C0, 0x76, "BMX1", 19.0);
         ccs811_sensor.begin(i2c_driver_I2C0, 0x5A);
         hall_angle_sensor.begin(i2c_driver_I2C0, 0x36);
-        ccs811_init_sensor(&ccs811_mox_sensor);
-        //ccs811_sensor.init();
-        hall_angle_sensor.init();
 
+        hall_angle_sensor.init();
+        ccs811_sensor.init();
+        
         gpio_reset_pin(GPIO_NUM_7);
         gpio_set_direction(GPIO_NUM_7, GPIO_MODE_OUTPUT);
         gpio_set_level(GPIO_NUM_7, true);
@@ -311,6 +330,7 @@ bool rdy_to_report = false;
 void Main::loop(void){
 
     auto [mcu_time_unix, time_reliability, now_tm] = Ntp_time::evaluate_mcu_rtc();
+    time_t now_sys_uptime_secs = (esp_timer_get_time()/1000);
 
     if(ESP_OK == i2c_num0_init_result)
     {
@@ -318,7 +338,8 @@ void Main::loop(void){
         //int hall_voltage = gpio_get_level(GPIO_NUM_4);
         //ESP_LOGI("hall:", "DC voltage: %d", hall_voltage);
         //vTaskDelay(50/portTICK_PERIOD_MS);
-        ambient_bme280.read();
+        tail_bmx280.read();
+        onboard_bmx280.read();
         hall_angle_sensor.read_wind_angle();
     
 
@@ -329,9 +350,10 @@ void Main::loop(void){
 
         //return;
 
-        /*ambient_bme280.read();
-        ccs811_sensor.set_baseline_ambient(ambient_bme280.temperature, ambient_bme280.humidity, 0xFFFF);
-        ccs811_sensor.read_measurement();*/
+        /*tail_bmx280.read();*/
+        
+        ccs811_sensor.read_measurement(onboard_bmx280.temperature, onboard_bmx280.humidity);
+        //ccs811_read_sensor(&ccs811_mox_sensor);
     }
     
     
@@ -357,7 +379,7 @@ void Main::loop(void){
         {
             esp_err_t mcu_info_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(mcu_time_unix, mcu_info.last_report_unix, MCUInfo::report_cycle_time_sec, false);
             esp_err_t network_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(mcu_time_unix, wlan_interface.last_report_unix, NETWORK::Wlan::report_cycle_time_sec, false);
-            esp_err_t bmx_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(mcu_time_unix, ambient_bme280.last_report_unix, bmx280_sensor::report_cycle_time_sec, false);
+            esp_err_t bmx_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(mcu_time_unix, tail_bmx280.last_report_unix, bmx280_sensor::report_cycle_time_sec, false);
             esp_err_t ac_input_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(mcu_time_unix, continous_adc_manager.last_report_unix, ADC_continous::report_cycle_time_sec, false);
 
             if ((ESP_OK == mcu_info_report_rdy) || (ESP_OK == network_report_rdy) || (ESP_OK == bmx_report_rdy) || (ESP_OK == ac_input_report_rdy))
@@ -378,10 +400,11 @@ void Main::loop(void){
                         mcu_info.get_service_data_report(mqtt_service_data_buffer, 2048);
                         ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
                         snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
-                        report_sent = ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
+                        report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
                         
                         if(ESP_OK == report_sent){
                             mcu_info.last_report_unix = mcu_time_unix;
+                            mcu_info.last_report_sys_uptime = esp_timer_get_time();
                         }
                     }
 
@@ -390,7 +413,7 @@ void Main::loop(void){
                         wlan_interface.get_service_data(mqtt_service_data_buffer, 2048);
                         ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
                         snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
-                        report_sent = ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
+                        report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
 
                         if(ESP_OK == report_sent){
                             wlan_interface.last_report_unix = mcu_time_unix;
@@ -399,13 +422,24 @@ void Main::loop(void){
 
                     if (ESP_OK == bmx_report_rdy)
                     {
-                        ambient_bme280.get_service_data_report(mqtt_service_data_buffer, 2048);
+                        tail_bmx280.get_service_data_report(mqtt_service_data_buffer, 2048, "bmx0");
                         ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
                         snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
-                        report_sent = ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
+                        report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
 
-                        if(ESP_OK == report_sent){
-                            ambient_bme280.last_report_unix = mcu_time_unix;
+                        if(ESP_OK == report_sent)
+                        {
+                            tail_bmx280.last_report_unix = mcu_time_unix;
+                        }
+
+                        onboard_bmx280.get_service_data_report(mqtt_service_data_buffer, 2048, "bmx1");
+                        ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
+                        snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
+                        report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
+
+                        if(ESP_OK == report_sent)
+                        {
+                            onboard_bmx280.last_report_unix = mcu_time_unix;
                         }
                     }
 
@@ -415,7 +449,7 @@ void Main::loop(void){
                         continous_adc_manager.get_service_data_report(mqtt_service_data_buffer, 2048, 3);
                         ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
                         snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
-                        report_sent = ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
+                        report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
 
                         // /*continous_adc_manager.get_service_data_ac_input(mqtt_service_data_buffer, 2048, 4);*/
                         //continous_adc_manager.get_service_data_report(mqtt_service_data_buffer, 2048, 4);
@@ -431,12 +465,12 @@ void Main::loop(void){
                     ccs811_sensor.get_service_data_report(mqtt_service_data_buffer, 2048);
                     ESP_LOGD("service_data", "%s", mqtt_service_data_buffer);
                     snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
-                    report_sent = ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
+                    report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
 
                     hall_angle_sensor.get_service_data_report(mqtt_service_data_buffer, 2048, 60000000.0 / (1.0 + (float)(wind_hall.pulse_low_us + wind_hall.pulse_high_us)), wind_hall.edge_count);
                     ESP_LOGD("service_data", "%s", mqtt_service_data_buffer);
                     snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
-                    report_sent = ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
+                    report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
 
                     wind_hall.pulse_low_us = 0;
                     wind_hall.pulse_high_us = 0;
@@ -454,6 +488,44 @@ void Main::loop(void){
 
                 /*wlan_interface.fastScan();*/
                 
+            }
+        }
+    }
+    else
+    {
+        if (true == rdy_to_report)
+        {
+            /* fallback in case NTP sync is not possible TODO: add timeout to not enter this part right away, try and get NTP sync before */
+
+            /* use the ESP internal uptime counter to send a status/ alive massage at least every 5 minutes - fallback operation */
+            esp_err_t mcu_info_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(now_sys_uptime_secs, mcu_info.last_report_sys_uptime, (60*5), false);
+
+            if (ESP_OK == mcu_info_report_rdy)
+            {
+
+                esp_err_t connect_res = ha_websoc.connectAndAuthSocket(5, 1500);
+
+                if (ESP_ERR_WIFI_BASE == connect_res)
+                {
+                    ESP_LOGE("WEBSOC", "No network, unable to connect.");
+                }
+                else
+                {
+                    esp_err_t report_sent = ESP_FAIL;
+
+                    mcu_info.get_service_data_report(mqtt_service_data_buffer, 2048);
+                    ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
+                    snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
+                    report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
+
+                    if (ESP_OK == report_sent)
+                    {
+                        mcu_info.last_report_unix = mcu_time_unix;
+                        mcu_info.last_report_sys_uptime = now_sys_uptime_secs;
+                    }
+                }
+                ha_websoc.disconnect();
+                rdy_to_report = false;
             }
         }
     }

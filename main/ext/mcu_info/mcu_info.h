@@ -285,6 +285,7 @@ RTC_FAST_ATTR uint64_t nv_mcu_awake_sec;*/
 
     static constexpr time_t report_cycle_time_sec{60 * 2};  /* only report if last report is older than 5 mins. */
     time_t last_report_unix;
+    time_t last_report_sys_uptime;
 
 
 };

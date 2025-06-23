@@ -39,34 +39,42 @@ void Homeassistant_websocket::event_handler(void *handler_args, esp_event_base_t
   }
 }
 
-esp_err_t Homeassistant_websocket::waitForResponse(const char *positiveRespKey, const char *negativeRespKey, uint16_t timeout = 5000)
+esp_err_t Homeassistant_websocket::waitForResponse(const char *positiveRespKey, const char *negativeRespKey, uint16_t timeout = 5000, uint16_t expected_resp_id = 0)
 {
 
   esp_err_t result = ESP_ERR_TIMEOUT;
   uint16_t responseTime = 0;
+  /*"id":7*/
+  char key_reponse_id[40] = {'\0'};
+  snprintf(key_reponse_id, 40, "\"id\":%d", expected_resp_id);
+  time_t resp_start_time = esp_timer_get_time();
 
-  for(responseTime = 0; ((ESP_ERR_TIMEOUT == result) && (responseTime < (timeout / poll_rx_buffer_ms))); responseTime++)
+  do
   {
-
     if (false == websoc_rx_data.processed)
     {
-      if ((positiveRespKey != NULL) && (strstr(websoc_rx_data.rx_buffer, positiveRespKey) != NULL))
+      if((0u == expected_resp_id) || (strstr(websoc_rx_data.rx_buffer, key_reponse_id) != NULL))  /* Compare response ID first, if request had an ID (ID not eq the default zero, function called with ID as argument)*/
       {
-        result = ESP_OK;
+        if ((positiveRespKey != NULL) && (strstr(websoc_rx_data.rx_buffer, positiveRespKey) != NULL))
+        {
+          result = ESP_OK;
+        }
+        else if ((negativeRespKey != NULL) && (strstr(websoc_rx_data.rx_buffer, negativeRespKey) != NULL))
+        {
+          result = ESP_FAIL;
+        }
       }
-      else if ((negativeRespKey != NULL) && (strstr(websoc_rx_data.rx_buffer, negativeRespKey) != NULL))
-      {
-        result = ESP_FAIL;
-      }
+      
       websoc_rx_data.processed = true;
     }
     else
     {
       vTaskDelay(poll_rx_buffer_ms / portTICK_PERIOD_MS);
     }
-  }
+  } while ((ESP_ERR_TIMEOUT == result) && ((esp_timer_get_time() - resp_start_time) < (timeout * 1000)));
+  responseTime = (esp_timer_get_time() - resp_start_time);
 
-  ESP_LOGI(ha_websoc_log_tag, COLOR_GRAY"RX:[%-12s |%4d bytes] %-17s, elapsed: %dms\nl-->:"COLOR_WHITE"%s", op_code_dbg(websoc_rx_data.op_code), websoc_rx_data.data_len,dbgResultLabels[(result & 0x03)], (responseTime * poll_rx_buffer_ms), websoc_rx_data.rx_buffer);
+  ESP_LOGI(ha_websoc_log_tag, COLOR_GRAY"RX:[%-12s |%4d bytes] %-17s, elapsed: %0.2fms\nl-->:"COLOR_WHITE"%s", op_code_dbg(websoc_rx_data.op_code), websoc_rx_data.data_len, esp_err_to_name(result), ((float)responseTime/1000.0), websoc_rx_data.rx_buffer);
 
   return result;
 }
@@ -200,7 +208,7 @@ esp_err_t Homeassistant_websocket::disconnect(void){
         memset(rxtx_buffer, '\0', txrx_buffer_size);
         uint16_t len = snprintf(rxtx_buffer, txrx_buffer_size, ha_websoc_auth_template, ha_websoc_token); /* move websoc out template with token into buff*/
         /*ESP_LOGI(ha_websoc_log_tag, "sending: %s", rxtx_buffer);*/
-
+        websoc_rx_data.processed = true;
         int8_t result = esp_websocket_client_send_text(websoc_client_handle, rxtx_buffer, len, portMAX_DELAY);
         if (-1 == result)
         {
@@ -215,9 +223,7 @@ esp_err_t Homeassistant_websocket::disconnect(void){
           ESP_LOGI(ha_websoc_log_tag, "TX:[%-12s |%4d/%4d bytes]\nl-<-:\x1b[0m%s\x1b[32m:-", op_code_dbg(1), result, strlen(rxtx_buffer), rxtx_buffer);
         }
 
-
-
-        if (ESP_OK == waitForResponse("auth_ok", NULL, 2000))
+        if (ESP_OK == waitForResponse("auth_ok", "\"success\":false", 2000))
         {
           socket_status = websoc_status_t::websoc_sts_connected_authed;
           request_id = 1;
@@ -253,19 +259,28 @@ esp_err_t Homeassistant_websocket::disconnect(void){
       for (uint16_t i = 0; ((res != ESP_OK) && (i < reattempt_send)); i++)
       {
 
-          [&]() { /* wait_clear_to_send(void) */
+          
+          auto wait_for_netiface_rdy = [&]() { /* wait_clear_to_send(void) */
 
             constexpr uint16_t wait_timeout_ms{1000};
             constexpr uint16_t network_CTS_poll_ms{50};
+            esp_err_t res = ESP_FAIL;
 
-            for (uint16_t i = 0; ((false == wlan_interface.network_ready()) && (i < (wait_timeout_ms / network_CTS_poll_ms))); i++)
+            for (uint16_t i = 0; (i < (wait_timeout_ms / network_CTS_poll_ms)); i++)
             {
+              if(true == wlan_interface.network_ready())
+              {
+                res = ESP_OK;
+                break;
+              }
               vTaskDelay(network_CTS_poll_ms / portTICK_PERIOD_MS);
             }
 
-          }();
+            return res;
+          };
 
-          if(true != wlan_interface.network_ready()){
+          if(ESP_OK != wait_for_netiface_rdy())
+          {
               ESP_LOGW(ha_websoc_log_tag, "Network no clear to send!");
               continue;
           }
@@ -277,11 +292,12 @@ esp_err_t Homeassistant_websocket::disconnect(void){
           request_id++;
           /*ESP_LOGI(ha_websoc_log_tag, "READY TO SEND: %d bytes: %s",strlen(rxtx_buffer), rxtx_buffer);*/
 
+          websoc_rx_data.processed = true;
           int16_t result = esp_websocket_client_send_text(websoc_client_handle, rxtx_buffer, len, (50 / portTICK_PERIOD_MS));
           ESP_LOGI(ha_websoc_log_tag, COLOR_GRAY"TX:[%-12s |%4d/%4d bytes]\nl-<-:"COLOR_WHITE"%s", op_code_dbg(1), result, strlen(rxtx_buffer), rxtx_buffer);
 
           if(result >= 0){
-            res = waitForResponse(positive_response_key, negative_response_key, response_timeout_ms);
+            res = waitForResponse(positive_response_key, negative_response_key, response_timeout_ms, (request_id - 1));
           }
           else{
             ESP_LOGE(ha_websoc_log_tag, "send failed.");

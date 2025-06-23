@@ -221,6 +221,11 @@ static esp_err_t bmx280_probe(bmx280_t *bmx280)
 {
     ESP_LOGI("bmx280", "Probing for BMP280/BME280 sensors on I2C %d", bmx280->i2c_port);
 
+    if(0xDE != bmx280->slave)
+    {
+        return bmx280_probe_address(bmx280);
+    }
+    
     #if CONFIG_BMX280_ADDRESS_HI
     bmx280->slave = 0xEE;
     return bmx280_probe_address(bmx280);
@@ -229,10 +234,10 @@ static esp_err_t bmx280_probe(bmx280_t *bmx280)
     return bmx280_probe_address(bmx280);
     #else
     esp_err_t err;
-    bmx280->slave = 0xEC;
+    bmx280->slave = 0xEC;   /* x76 << 1u */
     if ((err = bmx280_probe_address(bmx280)) != ESP_OK)
     {
-        bmx280->slave = 0xEE;
+        bmx280->slave = 0xEE; /* x77 << 1u */
         if ((err = bmx280_probe_address(bmx280)) != ESP_OK)
         {
             ESP_LOGE("bmx280", "Sensor not found.");
@@ -311,7 +316,7 @@ static esp_err_t bmx280_calibrate(bmx280_t *bmx280)
     return ESP_OK;
 }
 
-bmx280_t* bmx280_create(i2c_port_t port)
+bmx280_t* bmx280_create(i2c_port_t port, uint8_t i2c_address = 0xDE)
 {
     bmx280_t* bmx280 = (bmx280_t*)malloc(sizeof(bmx280_t)); /* TODO: proper cast for this, ideally rewrite to not use malloc*/
     if (bmx280)
@@ -319,7 +324,7 @@ bmx280_t* bmx280_create(i2c_port_t port)
         memset(bmx280, 0, sizeof(bmx280_t));
 
         bmx280->i2c_port = port;
-        bmx280->slave = 0xDE;
+        bmx280->slave = i2c_address;
         bmx280->chip_id = 0xAD;
     }
     return bmx280;

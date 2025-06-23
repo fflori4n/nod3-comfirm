@@ -47,7 +47,7 @@ private:
   static constexpr const char *ha_websoc_auth_template{"{\"type\":\"auth\",\"access_token\":\"%s\"}"};
   static constexpr const char *ha_websoc_ping_template{"{\"id\":%d,\"type\":\"ping\"}"};
 
-  static constexpr uint16_t poll_rx_buffer_ms{10};
+  static constexpr uint16_t poll_rx_buffer_ms{1};
 
   static constexpr const char *const dbgResultLabels[] = {"Response "COLOR_GREEN"OK"COLOR_GRAY, "Response "COLOR_RED"NEGATIVE"COLOR_GRAY, COLOR_RED"TIMEOUT"COLOR_GRAY, COLOR_RED"ERROR"COLOR_GRAY};
 
@@ -83,7 +83,7 @@ private:
 
   esp_err_t init(void);
   esp_err_t connect(void);
-  esp_err_t waitForResponse(const char* positiveRespKey,const char* negativeRespKey, uint16_t timeout);
+  esp_err_t waitForResponse(const char* positiveRespKey,const char* negativeRespKey, uint16_t timeout, uint16_t expected_resp_id);
 
 public:
   Homeassistant_websocket(void) { websocket_cfg.uri = ha_websoc_endpoint; }
@@ -103,21 +103,23 @@ public:
 
       if (0 == last_report_unix)
       {
-        last_report_unix = (now_unix - report_period_sec);
+        if (now_unix >= report_period_sec)
+        {
+          last_report_unix = (now_unix - report_period_sec);
+        }
+        res = ESP_OK;
       }
 
       if ((now_unix - last_report_unix) >= report_period_sec)
       {
         /* not just checking, but intend to send it, setting the new send time: last_report_unix*/
-        if(true == set_last_report){
+        if (true == set_last_report)
+        {
           last_report_unix = now_unix;
         }
-        
-
         res = ESP_OK;
       }
     }
-
     return res;
   }
 };
