@@ -94,7 +94,7 @@ namespace NETWORK
 
             static constexpr char* network_sensor_template = "\"w_rssi\":%.2f,\"w_dest\":%.2f,\"w_con_tm\":%.2f,\"w_recon\":%d,\"w_condev\":%d,\"w_alldev\":%d,\"w_chdev\":%d,\"w_apssid\":\"%s\"";
             static constexpr time_t report_cycle_time_sec{2 * 60};
-            time_t last_report_unix;
+            RTC_FAST_ATTR static inline time_t last_report_unix;
 
         private:
             char macAddressCStr[12+1]{};
@@ -286,10 +286,10 @@ namespace NETWORK
 
             static esp_err_t is_connected(void) {
                 
-                if(false != Wlan::wifi_ext_task_inhibit_flag)
-                {
-                    return ESP_ERR_NOT_ALLOWED;
-                }
+                // if(false != Wlan::wifi_ext_task_inhibit_flag)
+                // {
+                //     return ESP_ERR_NOT_ALLOWED;
+                // }
                 return (wlan_state_t::sta_connection_ok == _wlanIfaceState ) ? (ESP_OK) : (ESP_FAIL);
             }
             

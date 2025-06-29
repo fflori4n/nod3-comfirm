@@ -5,7 +5,7 @@
 static constexpr uint16_t txrx_buffer_size{2048};
 static char rxtx_buffer[txrx_buffer_size];
 
-#define WEBSOC_SENSOR_NAME "test_3nod_confirm"
+#define WEBSOC_SENSOR_NAME "hivesv2_no0"
 
 typedef struct {
     int data_len;    

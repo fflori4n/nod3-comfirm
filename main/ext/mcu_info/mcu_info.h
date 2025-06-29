@@ -6,8 +6,6 @@
 
 
 RTC_FAST_ATTR uint64_t nv_mcu_uptime_sec;
-
-/* this will increment on each PANIC or WAKE or this and that*/
 RTC_FAST_ATTR uint32_t reset_id_general_mem = 0;
 /* this will increment only in case of PANIC or in case RTC memory is cleared */
 RTC_FAST_ATTR uint32_t reset_id_rtcmem = 0;
@@ -261,14 +259,18 @@ RTC_FAST_ATTR uint64_t nv_mcu_awake_sec;*/
         report.add_float_report_item("mcu_tmreset", (float)((nv_mcu_sleep_sec + nv_mcu_awake_sec)/3600.0), 0.0f, (100 * 365 * 24));
         report.add_float_report_item("mcu_temp", (float)(chip_internal_temp_degc), -40.0f, 200.0f);
         report.add_cstr_report_item("mcu_rst", reset_reason_to_string(esp_reset_reason()));
-        report.add_float_report_item("mcu_awaketm", (float)(nv_mcu_awake_sec/3600.0), 0.0f, (100 * 365 * 24));
-        report.add_float_report_item("mcu_sleeptm", (float)(nv_mcu_sleep_sec/3600.0), 0.0f, (100 * 365 * 24));
         report.add_uint_report_item("mcu_sol", (uint32_t)(Ntp_time::get_sol()), 0, (100 * 365));
         /*report.add_uint_report_item("mcu_mem", (uint32_t)esp_get_free_internal_heap_size(), 0, 20000000);*/
         report.add_uint_report_item("mcu_minmem", (uint32_t)esp_get_minimum_free_heap_size(), 0, 20000000);
 
-        report.add_uint_report_item("mcu_rstid", (uint32_t)(reset_id_general_mem), 0, (100 * 365));
-        report.add_uint_report_item("mcu_rtcrstid", (uint32_t)(reset_id_rtcmem), 0, (100 * 365));
+        report.add_uint_report_item("mcu_rstid", (uint32_t)(reboot_statistics.reboot_id), 0, 0xFFFFFFFFFFFFFFFF);
+        report.add_uint_report_item("mcu_wknum", (uint32_t)(reboot_statistics.numof_wake_since_reset), 0, 0xFFFFFFFFFFFFFFFF);
+        report.add_float_report_item("mcu_upboot", (float)((reboot_statistics.active_time_since_reset_sec + reboot_statistics.sleep_time_since_reset_sec)/3600.0), 0, 0xFFFFFFFFFFFFFFFF);
+        report.add_float_report_item("mcu_upbootrecord", (float)((reboot_statistics.record_up_time)/3600.0), 0, 0xFFFFFFFFFFFFFFFF);
+        report.add_float_report_item("mcu_uptotal", (float)((reboot_statistics.total_active_time_sec + reboot_statistics.total_sleep_time_sec)/3600.0), 0, 0xFFFFFFFFFFFFFFFF);
+        report.add_float_report_item("mcu_sleepratio", (float)(100 * ((float)(reboot_statistics.sleep_time_since_reset_sec)/(reboot_statistics.active_time_since_reset_sec + reboot_statistics.sleep_time_since_reset_sec))), 0, 0xFFFFFFFFFFFFFFFF);
+        report.add_float_report_item("mcu_totalsleepratio", (float)(100 * ((float)(reboot_statistics.total_sleep_time_sec)/(reboot_statistics.total_active_time_sec + reboot_statistics.total_sleep_time_sec))), 0, 0xFFFFFFFFFFFFFFFF);
+        
         report.add_float_report_item("mcu_batv", (float)(bat_voltage), -0.0f, 10.0f);
         report.add_float_report_item("mcu_ldrv", (float)(ldr_mcu), -0.0f, 10.0f);
         
@@ -284,8 +286,8 @@ RTC_FAST_ATTR uint64_t nv_mcu_awake_sec;*/
     }
 
     static constexpr time_t report_cycle_time_sec{60 * 2};  /* only report if last report is older than 5 mins. */
-    time_t last_report_unix;
-    time_t last_report_sys_uptime;
+    RTC_FAST_ATTR static inline time_t last_report_unix;
+    RTC_FAST_ATTR static inline time_t last_report_sys_uptime;
 
 
 };

@@ -34,6 +34,25 @@ namespace Nvs_Manager{
 
     }user_cfg_critical_t;
 
+    typedef struct reboot_statistics_t{
+
+        uint32_t numof_usb_reset; /* probably due to new program flashing, as I'm not using USB to reset the board */
+        uint32_t numof_panic_reset;
+        uint32_t numof_brown_out_reset;
+        uint32_t numof_wake_since_reset;
+
+        time_t total_active_time_sec;
+        time_t total_sleep_time_sec;
+
+        time_t active_time_since_reset_sec;
+        time_t sleep_time_since_reset_sec;
+
+        time_t record_up_time;
+
+        uint64_t reboot_id; /* just a number that will change if sensor reboots (anything other than deep sleep)*/
+
+    }reboot_statistics_t;
+
     constexpr static char* log_label_nvs{"\x1b[34mNVS"};
 
     nvs_handle_t nvs_handle;
@@ -98,6 +117,22 @@ Nvs_Manager::user_cfg_critical_t user_cfg_basic = {
     .passwd = "world",
     .device_name = "test_sensor",
     .websoc_endpoint_url = "hello2"};
+
+Nvs_Manager::reboot_statistics_t reboot_statistics = {
+    .numof_usb_reset = 0,
+    .numof_panic_reset = 0,
+    .numof_brown_out_reset = 0,
+    .numof_wake_since_reset = 0,
+
+    .total_active_time_sec = 0,
+    .total_sleep_time_sec = 0,
+
+    .active_time_since_reset_sec = 0,
+    .sleep_time_since_reset_sec = 0,
+
+    .record_up_time = 0,
+    .reboot_id = 0
+    };
 
 std::string nvs_wlan_ssid = "";
 

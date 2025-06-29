@@ -169,6 +169,7 @@ private:
 
             res = i2c_master_cmd_begin(I2C_NUM_0, cmd_list_handle, CCS811::i2c_timeout);
             i2c_cmd_link_delete(cmd_list_handle);
+            vTaskDelay(10/portTICK_PERIOD_MS); /* @TODO: remove */
         }
         else
         {
@@ -212,6 +213,7 @@ private:
 
             res = i2c_master_cmd_begin(I2C_NUM_0/*this->i2c_port*/, cmd_list_handle, CCS811::i2c_timeout);
             i2c_cmd_link_delete(cmd_list_handle);   
+            vTaskDelay(10/portTICK_PERIOD_MS); /* @TODO: remove */
         }
         else
         {
@@ -251,7 +253,8 @@ public:
                 ESP_LOGI(log_label_ccs811, "HWID read as: 0x%x", ccs811_comm_buffer[0]);
             }
         }
-        
+
+        /* This sensor likes to stay powered on, without reset - because of baseline value dinamic calibration - if the firmware is running and no errors, continue without reseting the sensor */
         if(res == ESP_OK){
 
             /* Do a soft reset of sensor - get to a known state. set all regs to default. */
@@ -265,13 +268,11 @@ public:
             vTaskDelay(3000/portTICK_PERIOD_MS);
             if(ESP_OK == res)
             {
-                // ccs811_comm_buffer[0] = (uint8_t)CCS811_constant::MEASUREMENT_MODE_1SEC;
-                // res = this->read_reg((uint8_t)CCS811_register::MEASUREMENT_MODE, 1u);
                 res = this->write_reg((uint8_t)CCS811_register::CMD_APP_START, 0u);
                 vTaskDelay(3000/portTICK_PERIOD_MS);
             }  
         }
-
+        
         if(res == ESP_OK){
             /* exctract versioin info */
             ESP_LOGI(log_label_ccs811, "Checking CCS811 firmware and status:");
@@ -381,20 +382,19 @@ public:
 
         ESP_LOGI(log_label_ccs811,"Checking CCS811...");
 
-        res = this->read_reg((uint8_t)CCS811_register::MEASUREMENT_MODE, 1u);
-        if(selected_measurement_mode != ccs811_comm_buffer[0])
-        {
-            ESP_LOGW(log_label_ccs811, "Measurement mode is incorectly set: %d, now setting to %d", ccs811_comm_buffer[0], selected_measurement_mode);
-            ccs811_comm_buffer[0] = selected_measurement_mode;
-            res = this->write_reg((uint8_t)CCS811_register::MEASUREMENT_MODE, 1u);
-        }
+        res = this->read_reg((uint8_t)CCS811_register::STATUS, 1u);
+        status_reg = (status_reg_t)ccs811_comm_buffer[0];
 
-        status_reg.data_rdy = 0;
-        for (int i = 0; (i < 10) && (0u == status_reg.data_rdy); i++)
+        if((1u == status_reg.app_valid) && (0u == status_reg.error))
         {
-            res = this->read_reg((uint8_t)CCS811_register::STATUS, 1u);
-            status_reg = (status_reg_t)ccs811_comm_buffer[0];
-            //ESP_LOGI(log_label_ccs811, "Status reg: | %s | x | x | firmware load: %s | measurement rdy: %s | x | x | %s |", ((0u == status_reg.fw_mode) ? "BOOT" : "APP"), (0u == status_reg.app_valid) ? "ER" : "OK", (0u == status_reg.data_rdy) ? "NO" : "RDY", (0u == status_reg.error) ? "OK" : "ER");
+
+            if(1u != status_reg.fw_mode)
+            {
+                ESP_LOGW(log_label_ccs811, "Executing APP_START");
+                res = this->write_reg((uint8_t)CCS811_register::CMD_APP_START, 0u);
+                vTaskDelay(3000/portTICK_PERIOD_MS);
+            }
+            /* app mode:1, app valid:1, data rdy:X, error:0  - normal operation*/
             if(0u != status_reg.data_rdy)
             {
                 res = this->read_reg((uint8_t)CCS811_register::MEASUREMENT_RESULT, 4u);
@@ -405,11 +405,25 @@ public:
                 this->raw_voltage_mV = (1024.0 / (((ccs811_comm_buffer[1] << 8) | ccs811_comm_buffer[0]) & 0x0FFF)) * 1650;
                 res = this->read_reg((uint8_t)0x11, 2u);
                 this->raw_baseline = ((ccs811_comm_buffer[1] << 8) | ccs811_comm_buffer[0]);
-                this->debug_print();
-                vTaskDelay(200/portTICK_PERIOD_MS);
                 //this->set_baseline_ambient(ext_temperatur, ext_rh, 0xFFFF);
             }
+
+            res = this->read_reg((uint8_t)CCS811_register::MEASUREMENT_MODE, 1u);
+            if (selected_measurement_mode != ccs811_comm_buffer[0])
+            {
+                ESP_LOGW(log_label_ccs811, "Measurement mode is incorectly set: %d, now setting to %d", ccs811_comm_buffer[0], selected_measurement_mode);
+                ccs811_comm_buffer[0] = selected_measurement_mode;
+                res = this->write_reg((uint8_t)CCS811_register::MEASUREMENT_MODE, 1u);
+            }
         }
+        else
+        {
+            /* module is not working correcly, reinitialize */
+            ESP_LOGI(log_label_ccs811,"CCS811 is incorrecly configured, will do reinit");
+            ESP_LOGI(log_label_ccs811, "Status reg: | %s | x | x | firmware load: %s | measurement rdy: %s | x | x | %s |", ((0u == status_reg.fw_mode) ? "BOOT" : "APP"), (0u == status_reg.app_valid) ? "ER" : "OK", (0u == status_reg.data_rdy) ? "NO" : "RDY", (0u == status_reg.error) ? "OK" : "ER");
+            this->init();
+        }
+
         return res;
     }
 

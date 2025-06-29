@@ -31,6 +31,8 @@ class Digio_pin{
 
     volatile int64_t pulse_low_us  = 0u;
     volatile int64_t pulse_high_us = 0u;
+
+    constexpr static char* log_label_dig_in{COLOR_BLUE"DIG_IN"COLOR_WHITE};
     
 
 
@@ -73,9 +75,8 @@ class Digio_pin{
 
     void dbgPrint(){
 
-        ESP_LOGI("DIG_IN", "GPIO: %d", this->gpio_pin);
-        ESP_LOGI("DIG_IN", "state: %d, edges detected: %d", this->pin_state, this->edge_count);
-        ESP_LOGI("DIG_IN", "pulse sig: high/low:  %0.2f/ %0.2f, period ms: %0.2f", (float)(this->pulse_low_us / 1000.0), (float)(this->pulse_high_us / 1000.0), (float)((this->pulse_low_us + this->pulse_high_us)/1000.0));
+        ESP_LOGI(log_label_dig_in, "GPIO%d\tstate: %d, edges detected: %d", this->gpio_pin, this->pin_state, this->edge_count);
+        ESP_LOGI(log_label_dig_in, "\tpulse sig: high/low:  %0.2f/ %0.2f, period ms: %0.2f", (float)(this->pulse_low_us / 1000.0), (float)(this->pulse_high_us / 1000.0), (float)((this->pulse_low_us + this->pulse_high_us)/1000.0));
     }
 
     esp_err_t configure_as_frequency_input(){

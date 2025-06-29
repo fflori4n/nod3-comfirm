@@ -101,6 +101,7 @@
 #include "led_ws2812b/led_ws2812b.h"
 #include "digio_manager/digio.h"
 #include "as5600/as5600.h"
+#include "hx711/hx711.h"
 
 
 
@@ -128,7 +129,7 @@ class bmx280_sensor{
         constexpr static char* log_label_bmx280{COLOR_PINK"BMx280"COLOR_WHITE};
 
         static constexpr time_t report_cycle_time_sec{2 * 60};
-        time_t last_report_unix;
+        RTC_FAST_ATTR static inline time_t last_report_unix;
 
         static float calculateAbsoluteHumidity(float humidity, float temperature, float& current_water_mass_mgm3, float& saturation_water_mass_mgm3){
 
@@ -141,8 +142,8 @@ class bmx280_sensor{
             saturation_water_mass_mgm3 = ((sat_vapor_pressure * 100 * molar_mass_water) / (gas_constant * (temperature + kelvin_to_celsius_offset))) * 1000;
             current_water_mass_mgm3 = ((sat_vapor_pressure * humidity * molar_mass_water) / (gas_constant * (temperature + kelvin_to_celsius_offset))) * 1000;
 
-            ESP_LOGI(log_label_bmx280,"vapor pressure: %.2f, mass of water in air: %.2f/%.2f", sat_vapor_pressure, current_water_mass_mgm3, saturation_water_mass_mgm3);
-
+            ESP_LOGI(log_label_bmx280,"\tSAT.VAPOR PRESSURE: %.2f", sat_vapor_pressure);
+            ESP_LOGI(log_label_bmx280,"\tMASS OF WATER in AIR: %.2f/%.2f mg/m^3", current_water_mass_mgm3, saturation_water_mass_mgm3);
             return sat_vapor_pressure;
         }
 
@@ -221,12 +222,13 @@ class bmx280_sensor{
 
         masl_pressure_mbar = ((float)(pressure * masl_pressure_compensation_factor) / 100.0) + 18.0;
 
-        ESP_LOGI(log_label_bmx280,"I2C_ADDR: %x, DEV_TYPE: %s(0x%x)",bmx280_sens_pointer->slave, (0x60 == bmx280_sens_pointer->chip_id) ? "BME" : "BMP", bmx280_sens_pointer->chip_id);
-        ESP_LOGI(log_label_bmx280,"TEMP:%.2f, REL.Humidity:%.2f, masl_pressure:%.2f", temperature, humidity, masl_pressure_mbar);
-        ESP_LOGI(log_label_bmx280,"atm_pressure:%.2f, compensation:%.2f, masl_pressure:%.2f", pressure/100.0, ((pressure * masl_pressure_compensation_factor) / 100.0), masl_pressure_mbar);
-
+        ESP_LOGI(log_label_bmx280,"%s(0x%x) @ I2C_ADDR: %x", (0x60 == bmx280_sens_pointer->chip_id) ? "BME" : "BMP", bmx280_sens_pointer->chip_id, bmx280_sens_pointer->slave);
+        ESP_LOGI(log_label_bmx280,"\tTEMPERATURE:%.2f °C", temperature);
+        ESP_LOGI(log_label_bmx280,"\tRHUMIDITY:%.2f %",humidity);
+        ESP_LOGI(log_label_bmx280,"\tMasl_PRESSURE:%.2f mBAR, measured:%.2f mBAR", masl_pressure_mbar, pressure/100.0);
         calculateAbsoluteHumidity(humidity, temperature, absolute_humidity, saturation_humidity);
-
+        ESP_LOGI(log_label_bmx280,"");
+        
         if(ESP_OK == res)
         {
             last_reading = rtc_now;

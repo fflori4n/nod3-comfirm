@@ -146,15 +146,14 @@ esp_err_t Wlan::sta_connect(void){
         
         _wlanIfaceState = wlan_state_t::standby;
         esp_wifi_set_mode(WIFI_MODE_STA);
+        esp_wifi_start();
 
-        esp_wifi_set_max_tx_power(20 * 4);
-
-        retStatus = esp_wifi_set_max_tx_power(80);  // 20 dBm
+        retStatus = esp_wifi_set_max_tx_power(20 * 4);  // 20 dBm
         if (retStatus != ESP_OK) {
             printf("Failed to set TX power: %s\n", esp_err_to_name(retStatus));
         }
         
-        esp_wifi_start();
+        
         retStatus = esp_wifi_connect();
     }
     
@@ -875,15 +874,21 @@ void task_wlan_manager(void *parameters){
         constexpr uint16_t WIFI_PAUSE_BEFORE_RECONNECT_ATTEMPT_SEC{20};
         constexpr uint16_t WIFI_NETWORK_STATISTICS_SCAN_PERIOD_SEC{60};
 
-        ESP_LOGI(NETWORK::Wlan::network_tag, "wifi iface manage start");
+        ESP_LOGI(NETWORK::Wlan::network_tag, "WIFI TASK STARTED");
         wlan_interface.loadMACAddress();
+        time_t sys_time_state_entered_secs = (esp_timer_get_time()/1000);
 
-        /*wlan_interface.statistics.connection_ok_sec = 0;*/
-        //wlan_interface.wifi_trying_to_connect = 0;
-        //wlan_interface.sta_connect();
-        
+        /* [INIT] */
+        /* [INACTIVE] */
+        /* [STANDBY]-----------------------------------------------------------A-- [AP_ACTIVE]              */
+        /* l--> (WIFI_EVENT_STA_START) -> [sta_wait_for_connection]                 l--> soft_reset         */
+        /* l--> (WIFI_EVENT_STA_CONNECTED) -> [sta_wait_for_ip]                                             */
+        /* l--> (IP_EVENT_STA_GOT_IP) -> [connection_ok]                                                    */
 
         for(;;){
+
+            ESP_LOGI(NETWORK::Wlan::network_tag, "Wifi iface status: %d", wlan_interface.get_wlan_state());
+            
 
             switch(((Wlan::wlan_state_t)wlan_interface.get_wlan_state()))
             {
@@ -942,12 +947,17 @@ void task_wlan_manager(void *parameters){
                         wlan_interface.statistics.num_of_reconnect++;
                         vTaskDelay((WIFI_PAUSE_BEFORE_RECONNECT_ATTEMPT_SEC * 1000) / portTICK_PERIOD_MS);
                     }
-                    
+                    sys_time_state_entered_secs = (esp_timer_get_time()/1000);
                     break;
                 }
 
                 case Wlan::wlan_state_t::sta_wait_for_ip:
                 {
+                    if((esp_timer_get_time()/1000) - sys_time_state_entered_secs > (30))
+                    {
+                        ESP_LOGI(NETWORK::Wlan::network_tag, "waiting for IP address for too long, will disconnect");
+                        wlan_interface.set_wlan_state(Wlan::wlan_state_t::inactive);
+                    }
                     /* Waiting for IP, nothing to do */
                     break;
                 }

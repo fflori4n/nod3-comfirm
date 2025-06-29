@@ -25,9 +25,9 @@ private:
     static constexpr uint16_t i2c_com_pause_read{100};
     static constexpr uint16_t i2c_com_pause_write{500};
 
-    static constexpr uint16_t mag_offset{4096 - 80};
-    static constexpr bool cw_ccw_flip{1};
-    static constexpr uint16_t mount_offset{43};
+    static constexpr uint16_t mag_offset{4096-1964};
+    static constexpr bool cw_ccw_flip{0};
+    static constexpr uint16_t mount_offset{92};
 
 
     double angle;
@@ -35,6 +35,7 @@ private:
     uint8_t mag_status;
     uint8_t gain_ctrl;
     uint16_t hall_magnitude;
+    float previous_degrees;
     float degrees;
 
     //  CONFIGURATION REGISTERS
@@ -103,6 +104,7 @@ const uint8_t AS5600_CONF_WATCH_DOG     = 0x20;
     };
 
 public:
+    constexpr static char* log_label_as5600{COLOR_PINK"AS5600"COLOR_WHITE};
 private:
     esp_err_t read_reg(const uint8_t reg_addr, const size_t numof_bytes)
     {
@@ -207,7 +209,7 @@ public:
 
         res = this->read_reg((uint8_t)CCS811_register::STATUS, 1u);
 
-        ESP_LOGW("A5600", "res %d", res);
+        /*ESP_LOGW("A5600", "res %d", res);*/
         if(res != ESP_OK)
         {
             
@@ -216,50 +218,50 @@ public:
         }
         else
         {
-            ESP_LOGW("A5600", "STATUS read as: MAG DETECTED: %d | MAG LOW: %d | MAG HIGH: %d |", (comm_buffer[0] & (1u << 5u)), (comm_buffer[0] & (1u << 4u)), (comm_buffer[0] & (1u << 3u)));
+            //ESP_LOGW("A5600", "STATUS read as: MAG DETECTED: %d | MAG LOW: %d | MAG HIGH: %d |", (comm_buffer[0] & (1u << 5u)), (comm_buffer[0] & (1u << 4u)), (comm_buffer[0] & (1u << 3u)));
         }
 
-        res = this->read_reg(0x0C, 4u);
+        // res = this->read_reg(0x0C, 4u);
 
-        ESP_LOGW("A5600", "res %d", res);
-        if(res != ESP_OK)
-        {
+        // ESP_LOGW("A5600", "res %d", res);
+        // if(res != ESP_OK)
+        // {
             
-            ESP_LOGW("A5600", "Sensor communication failed. ");
-            res = ESP_FAIL;
-        }
-        else
-        {
-            ESP_LOGW("A5600", "RAW angle read as: %d, angle: %d", ((comm_buffer[0]<< 8) | comm_buffer[1]) & 0x0FFF, ((comm_buffer[2]<< 8) | comm_buffer[3]) & 0x0FFF);
-        }
+        //     ESP_LOGW("A5600", "Sensor communication failed. ");
+        //     res = ESP_FAIL;
+        // }
+        // else
+        // {
+        //     ESP_LOGW("A5600", "RAW angle read as: %d, angle: %d", ((comm_buffer[0]<< 8) | comm_buffer[1]) & 0x0FFF, ((comm_buffer[2]<< 8) | comm_buffer[3]) & 0x0FFF);
+        // }
 
-        res = this->read_reg(0x1A, 1u);
+        // res = this->read_reg(0x1A, 1u);
 
-        ESP_LOGW("A5600", "res %d", res);
-        if(res != ESP_OK)
-        {
+        // ESP_LOGW("A5600", "res %d", res);
+        // if(res != ESP_OK)
+        // {
             
-            ESP_LOGW("A5600", "Sensor communication failed. ");
-            res = ESP_FAIL;
-        }
-        else
-        {
-            ESP_LOGW("A5600", "AGC read as: %d", (comm_buffer[0] & 0x7F));
-        }
+        //     ESP_LOGW("A5600", "Sensor communication failed. ");
+        //     res = ESP_FAIL;
+        // }
+        // else
+        // {
+        //     ESP_LOGW("A5600", "AGC read as: %d", (comm_buffer[0] & 0x7F));
+        // }
 
-        res = this->read_reg(0x1B, 2u);
+        // res = this->read_reg(0x1B, 2u);
 
-        ESP_LOGW("A5600", "res %d", res);
-        if(res != ESP_OK)
-        {
+        // ESP_LOGW("A5600", "res %d", res);
+        // if(res != ESP_OK)
+        // {
             
-            ESP_LOGW("A5600", "Sensor communication failed. ");
-            res = ESP_FAIL;
-        }
-        else
-        {
-            ESP_LOGW("A5600", "magnitude read as: %d", ((comm_buffer[0] << 8u) | comm_buffer[1]) & 0x0FFF);
-        }
+        //     ESP_LOGW("A5600", "Sensor communication failed. ");
+        //     res = ESP_FAIL;
+        // }
+        // else
+        // {
+        //     ESP_LOGW("A5600", "magnitude read as: %d", ((comm_buffer[0] << 8u) | comm_buffer[1]) & 0x0FFF);
+        // }
         
         return res;
     }
@@ -298,12 +300,12 @@ public:
 
         if(res == ESP_OK)
         {
-            ESP_LOGI("A5600", "Angle: Raw: %d, Filtered: %d", ((comm_buffer[0]<< 8) | comm_buffer[1]) & 0x0FFF, ((comm_buffer[2]<< 8) | comm_buffer[3]) & 0x0FFF);
+            ESP_LOGI(log_label_as5600, "ANGLE: RAW - FILTR.: %d - %d", ((comm_buffer[0]<< 8) | comm_buffer[1]) & 0x0FFF, ((comm_buffer[2]<< 8) | comm_buffer[3]) & 0x0FFF);
             raw_reading = ((comm_buffer[2]<< 8) | comm_buffer[3]) & 0x0FFF; /* NOTE: it is actually already filtered by AS5600 nut for us it is raw, nameing is hard */
         }
         else
         {
-            ESP_LOGW("A5600", "Sensor communication failed. ");
+            ESP_LOGW(log_label_as5600, "Sensor communication failed. ");
             res = ESP_FAIL;
         }
 
@@ -313,16 +315,16 @@ public:
 
             if (res == ESP_OK)
             {
-                ESP_LOGI("A5600", "MAG: Detect: %d, Low: %d, High: %d", ((comm_buffer[0] & (1u << 5u)) != 0), ((comm_buffer[0] & (1u << 4u)) != 0), ((comm_buffer[0] & (1u << 3u)) != 0));
+                ESP_LOGI(log_label_as5600, "MAG OK:%d, LOW:%d, HIGH:%d", ((comm_buffer[0] & (1u << 5u)) != 0), ((comm_buffer[0] & (1u << 4u)) != 0), ((comm_buffer[0] & (1u << 3u)) != 0));
                 mag_status = ((((comm_buffer[0] & (1u << 5u)) != 0)) << 2u) | ((((comm_buffer[0] & (1u << 4u)) != 0)) << 1u) | ((((comm_buffer[0] & (1u << 3u)) != 0)) << 0u);
-                ESP_LOGI("A5600", "auto gain: %d, magnitude: %d, mag status: %d", comm_buffer[1],((comm_buffer[2] << 8u) | comm_buffer[3]), mag_status);
+                ESP_LOGI(log_label_as5600, "SENS_GAIN: %d, SENS_MAGNITUDE: %d, mag status: %d", comm_buffer[1],((comm_buffer[2] << 8u) | comm_buffer[3]), mag_status);
 
                 gain_ctrl = comm_buffer[1];
                 hall_magnitude = ((comm_buffer[2] << 8u) | comm_buffer[3]);
             }
             else
             {
-                ESP_LOGW("A5600", "Sensor communication failed. ");
+                ESP_LOGW(log_label_as5600, "Sensor communication failed. ");
                 res = ESP_FAIL;
             }
         }
@@ -333,12 +335,24 @@ public:
 
         float degrees_no_offs = 360.0 * ((float)angle_new_cccw / 4096.0);
 
-        ESP_LOGI("A5600", "angle: %d, angle /w mag_offs: %d, angle ccw flip: %d", raw_reading, angle_original_cccw, angle_new_cccw);
+        ESP_LOGI(log_label_as5600, "RAW_ANGLE:%d, MAG_OFFS_ANGLE:%d, ANGLE_CCW_FLIP:%d", raw_reading, angle_original_cccw, angle_new_cccw);
         
-        degrees = fmod((degrees_no_offs + mount_offset), 360.0);
-        degrees = (degrees < 0) ? (degrees + 360.0) : (degrees);
+        float new_measurement_degs = fmod((degrees_no_offs + mount_offset), 360.0);
+        new_measurement_degs = (new_measurement_degs < 0) ? (new_measurement_degs + 360.0) : (new_measurement_degs);
 
-        ESP_LOGI("A5600", "degc: %0.2f, degc offset: %0.2f", degrees_no_offs, degrees);
+        int16_t dccw = (int16_t)((360 + previous_degrees) - new_measurement_degs) % 360;
+        int16_t dcw = (int16_t)((360 - previous_degrees) + new_measurement_degs) % 360;
+
+        ESP_LOGI(log_label_as5600, "dccw:%d, ccw:%d", dccw, dcw);
+
+        /* sometimes vane will rotate together with the rotor, if wind is very mild. only update reading if vane rotates counter to the rotor, this will happen when friction displaces the vane when rotating rotor-wise and then the wind puts it back to the correct place */
+        ESP_LOGI(log_label_as5600, "degc_previous: %0.2f, degc_new: %0.2f", previous_degrees, new_measurement_degs);
+        previous_degrees = new_measurement_degs;
+        if(dccw < (dcw + 10)){
+            degrees = new_measurement_degs;
+        }
+
+        ESP_LOGI(log_label_as5600, "degc: %0.2f, degc offset: %0.2f", degrees_no_offs, degrees);
 
 
         return 0;
@@ -358,8 +372,6 @@ public:
         report.add_float_report_item("wanemo_lrpm", (float)(lrpm), 0.0f, 10000.0f);
         /*report.add_float_report_item("wanemo_hrpm", (float)(hrpm), 0.0f, 10000.0f);*/
         report.add_float_report_item("wanemo_edge", (float)(pulse_count), 0.0f, 0xFFFFFFFF);
-
-        
 
         int16_t res = snprintf(text_buffer, text_buffer_size, "%s", report.get_service_data_buffer().c_str());
 

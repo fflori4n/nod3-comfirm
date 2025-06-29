@@ -5,7 +5,7 @@
 #include "../adc_continuous_internal.h" /* NOTE: shame on me, this crap took waaaay too long to figure out*/
 
 
-#define ADC_CONTINOUS_ENABLE_DEBUG_OUTPUT
+/*#define ADC_CONTINOUS_ENABLE_DEBUG_OUTPUT*/
 #define COUNT_ALL_ZERO_CROSS
 
 bool adc_continous_pause = true;
@@ -158,7 +158,7 @@ public:
     
     const char *module_tag{"ADC_CONTINOUS"};
     static constexpr time_t report_cycle_time_sec{2 * 60};
-    time_t last_report_unix;
+    RTC_FAST_ATTR static inline time_t last_report_unix;
     /* ADC continous ESP_IDF specific variables */
 
     static adc_continuous_ctx_t *adc_continous_driver_handle;
@@ -184,7 +184,7 @@ public:
     static constexpr uint32_t adc_selected_bit_width{12};
 
     /* set up list of GPIOs to sample */
-    static constexpr adc_channel_t adc_active_channels[5]{ADC_CHANNEL_0,  ADC_CHANNEL_1, ADC_CHANNEL_2, ADC_CHANNEL_3, ADC_CHANNEL_4};
+    static constexpr adc_channel_t adc_active_channels[3]{ADC_CHANNEL_0,  ADC_CHANNEL_1, /*ADC_CHANNEL_2,*/ ADC_CHANNEL_3, /*ADC_CHANNEL_4*/};
     static constexpr uint8_t adc_numof_active_channels{sizeof(adc_active_channels) / sizeof(adc_active_channels[0])};
 
     /* DMA related settings */

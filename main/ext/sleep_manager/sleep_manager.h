@@ -43,7 +43,7 @@ class Sleep_manager{
         if((Ntp_time::rtc_time_sts_t::Not_synced_usable == time_reliability) || (Ntp_time::rtc_time_sts_t::OK == time_reliability)){
 
             if(0 != nv_last_deep_sleep_entered_exited_at_unix){
-                //ESP_LOGW("NIGHTMAN", "woke up after: %lld seconds of deep sleep, setting current time as wake time", (mcu_time_now_unix - nv_last_deep_sleep_entered_exited_at_unix));
+                ESP_LOGW("NIGHTMAN", "woke up after: %lld seconds of deep sleep, setting current time as wake time", (mcu_time_now_unix - nv_last_deep_sleep_entered_exited_at_unix));
             
                 nv_mcu_sleep_sec += (mcu_time_now_unix - nv_last_deep_sleep_entered_exited_at_unix);
                 nv_last_deep_sleep_entered_exited_at_unix = mcu_time_now_unix;
@@ -51,7 +51,7 @@ class Sleep_manager{
             }
             else{
 
-                //ESP_LOGW("NIGHTMAN", "woke up after: [unknown] seconds of deep sleep, setting current time as wake time");
+                ESP_LOGW("NIGHTMAN", "woke up after: [unknown] seconds of deep sleep, setting current time as wake time");
                 nv_last_deep_sleep_entered_exited_at_unix = mcu_time_now_unix;
 
                 return ESP_FAIL;

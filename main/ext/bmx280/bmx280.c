@@ -153,6 +153,7 @@ static esp_err_t bmx280_read(bmx280_t *bmx280, uint8_t addr, uint8_t *dout, size
 
         err = i2c_master_cmd_begin(bmx280->i2c_port, cmd, CONFIG_BMX280_TIMEOUT);
         i2c_cmd_link_delete(cmd);
+        vTaskDelay(10/portTICK_PERIOD_MS); /* @TODO: remove */
         return err;
     }
     else
@@ -180,6 +181,7 @@ static esp_err_t bmx280_write(bmx280_t* bmx280, uint8_t addr, const uint8_t *din
 
         err = i2c_master_cmd_begin(bmx280->i2c_port, cmd, CONFIG_BMX280_TIMEOUT);
         i2c_cmd_link_delete(cmd);
+        vTaskDelay(10/portTICK_PERIOD_MS); /* @TODO: remove */
         return err;
     }
     else
@@ -204,8 +206,8 @@ static esp_err_t bmx280_probe_address(bmx280_t *bmx280)
         #endif
         )
         {
-            ESP_LOGI("bmx280", "Probe success: address=%hhx, id=%hhx", bmx280->slave, bmx280->chip_id);
-           return ESP_OK;
+            ESP_LOGI(COLOR_PINK"BMx280"COLOR_WHITE, "Probed: %s(%d) device @ addr:0x%X", (0x58 == bmx280->chip_id) ? "BMP280": "BME280", bmx280->chip_id, bmx280->slave);
+            return ESP_OK;
         }
         else
         {
@@ -213,14 +215,12 @@ static esp_err_t bmx280_probe_address(bmx280_t *bmx280)
         }
     }
 
-    ESP_LOGW("bmx280", "Probe failure: address=%hhx, id=%hhx, reason=%s", bmx280->slave, bmx280->chip_id, esp_err_to_name(err));
+    ESP_LOGW(COLOR_PINK"BMx280"COLOR_WHITE, "Probe failure: address=%hhx, id=%hhx, reason=%s", bmx280->slave, bmx280->chip_id, esp_err_to_name(err));
     return err;
 }
 
 static esp_err_t bmx280_probe(bmx280_t *bmx280)
 {
-    ESP_LOGI("bmx280", "Probing for BMP280/BME280 sensors on I2C %d", bmx280->i2c_port);
-
     if(0xDE != bmx280->slave)
     {
         return bmx280_probe_address(bmx280);
@@ -264,7 +264,7 @@ static esp_err_t bmx280_calibrate(bmx280_t *bmx280)
     //
     // Write and pray to optimizations is my new motto.
 
-    ESP_LOGI("bmx280", "Reading out calibration values...");
+    /*ESP_LOGI("bmx280", "Reading out calibration values...");*/
 
     esp_err_t err;
     uint8_t buf[26];
@@ -274,7 +274,7 @@ static esp_err_t bmx280_calibrate(bmx280_t *bmx280)
 
     if (err != ESP_OK) return err;
 
-    ESP_LOGI("bmx280", "Read Low Bank.");
+    /*ESP_LOGI("bmx280", "Read Low Bank.");*/
 
     bmx280->cmps.T1 = buf[0] | (buf[1] << 8);
     bmx280->cmps.T2 = buf[2] | (buf[3] << 8);
@@ -302,7 +302,7 @@ static esp_err_t bmx280_calibrate(bmx280_t *bmx280)
 
         if (err != ESP_OK) return err;
 
-        ESP_LOGI("bmx280", "Read High Bank.");
+        /*ESP_LOGI("bmx280", "Read High Bank.");*/
 
         bmx280->cmps.H2 = buf[0] | (buf[1] << 8);
         bmx280->cmps.H3 = buf[2];
@@ -348,9 +348,7 @@ esp_err_t bmx280_init(bmx280_t* bmx280)
 
         // Read calibration data.
         bmx280_calibrate(bmx280);
-
-        ESP_LOGI("bmx280", "Dumping calibration...");
-        ESP_LOG_BUFFER_HEX("bmx280", &bmx280->cmps, sizeof(bmx280->cmps));
+        ESP_LOG_BUFFER_HEX(COLOR_PINK"BMx280"COLOR_WHITE, &bmx280->cmps, sizeof(bmx280->cmps));
     }
 
     return error;

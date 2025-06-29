@@ -46,7 +46,7 @@ public:
 
     static inline RTC_FAST_ATTR time_t rtc_last_updated_at_unix = time(nullptr);   /* store the last time RTC was set from NTP server */
     static inline RTC_FAST_ATTR time_t rtc_last_read_unix = time(nullptr);         /* store the last value of RTC that was read during evaluate_mcu_rtc (at least keep approximate time after soft reset)*/
-    static inline uint32_t time_since_last_ntp_sync_sec;
+    static inline RTC_FAST_ATTR uint32_t time_since_last_ntp_sync_sec;
 
     static esp_sntp_config_t sntp_config;
 
@@ -71,7 +71,7 @@ public:
         }
 
         /* check what is the current status of the RTC clock inside ESP, is it up to date, when was it updated and so on */
-        static std::tuple<time_t, rtc_time_sts_t, struct tm> evaluate_mcu_rtc(void)
+        static std::tuple<time_t, rtc_time_sts_t, struct tm> evaluate_mcu_rtc(const bool verbose = false)
         {
             mcu_time_status = rtc_time_sts_t::Error;
             time(&(Ntp_time::rtc_current_time_unix));
@@ -92,8 +92,10 @@ public:
 
                 Ntp_time::anno_domini_unix = mktime(&anno_domini_tm);
 
-                ESP_LOGI(log_label_time_cfg,"\tAnno domini time was set as: %lld", Ntp_time::anno_domini_unix);
-
+                if(true == verbose)
+                {
+                    ESP_LOGI(log_label_time_cfg,"\tAnno domini time was set as: %lld", Ntp_time::anno_domini_unix);
+                }
             }
 
             if(Ntp_time::rtc_current_time_unix <= Ntp_time::anno_domini_unix)
@@ -140,13 +142,20 @@ public:
             strftime(strftimeBuffer, sizeof(strftimeBuffer), "%c", &tmCurrentTime);
             time_since_last_ntp_sync_sec = static_cast<uint32_t>(Ntp_time::rtc_current_time_unix - Ntp_time::rtc_last_updated_at_unix);
 
-            ESP_LOGI(log_label_time, "RTC:\tRTC_SYNC: %s", rtc_time_sts_labels[(uint8_t)mcu_time_status]);
-            ESP_LOGI(log_label_time, "\tRTC: loc. %s, RTC_UNIX: %lld", strftimeBuffer, Ntp_time::rtc_current_time_unix);
+            if(true == verbose)
+            {
+                ESP_LOGI(log_label_time, "RTC:\tRTC_SYNC: %s", rtc_time_sts_labels[(uint8_t)mcu_time_status]);
+                ESP_LOGI(log_label_time, "\tRTC: loc. %s, RTC_UNIX: %lld", strftimeBuffer, Ntp_time::rtc_current_time_unix);
+            }
 
             localtime_r(&(Ntp_time::rtc_last_updated_at_unix), &tmCurrentTime);
-            strftime(strftimeBuffer, sizeof(strftimeBuffer), "%c", &tmCurrentTime);
-            ESP_LOGI(log_label_time, "\tLAST_SYNC: loc. %s, previous/next update: %ld/%lld secs", strftimeBuffer, time_since_last_ntp_sync_sec,(sntp_sync_interval_ms/1000) - (Ntp_time::rtc_current_time_unix - Ntp_time::rtc_last_updated_at_unix));
 
+            if(true == verbose)
+            {
+                strftime(strftimeBuffer, sizeof(strftimeBuffer), "%c", &tmCurrentTime);
+                ESP_LOGI(log_label_time, "\tLAST_SYNC: loc. %s, previous/next update: %ld/%lld secs", strftimeBuffer, time_since_last_ntp_sync_sec,(sntp_sync_interval_ms/1000) - (Ntp_time::rtc_current_time_unix - Ntp_time::rtc_last_updated_at_unix));
+            }
+            
             return {Ntp_time::rtc_current_time_unix, mcu_time_status, tmCurrentTime};
         }
 };

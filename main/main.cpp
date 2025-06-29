@@ -124,10 +124,8 @@ esp_err_t Main::init(void){
                  (mcu_type_information.features & CHIP_FEATURE_BLE) ? "BLE" : "",
                  (mcu_type_information.features & CHIP_FEATURE_IEEE802154) ? ", 802.15.4 (Zigbee/Thread)" : "");
     uint8_t mac_address[6] = {'\0'};
-    esp_wifi_get_mac((wifi_interface_t)ESP_MAC_BASE, mac_address); // Or esp_read_mac() if you need to specify the interface
+    esp_wifi_get_mac((wifi_interface_t)WIFI_IF_STA, mac_address); // Or esp_read_mac() if you need to specify the interface
     ESP_LOGW(sys_up_tag, "\tWLAN MAC: %02X:%02X:%02X:%02X:%02X:%02X", mac_address[0], mac_address[1], mac_address[2], mac_address[3], mac_address[4], mac_address[5]);
-    esp_wifi_get_mac((wifi_interface_t)ESP_MAC_EFUSE_FACTORY, mac_address); // Or esp_read_mac() if you need to specify the interface
-    ESP_LOGW(sys_up_tag, "\tFACTORY MAC: %02X:%02X:%02X:%02X:%02X:%02X", mac_address[0], mac_address[1], mac_address[2], mac_address[3], mac_address[4], mac_address[5]);
     ESP_LOGW(sys_up_tag, "\tMCU TEMP: %0.2f °C", mcu_info.chip_internal_temp_degc);
     ESP_LOGW(sys_up_tag, "\tMaximum available heep: %lld bytes", maximum_free_heep_size);
     ESP_LOGW(sys_up_tag, "\tCurrent heep: %0.2f%, %lld bytes", 100.0 - (((float)esp_get_free_heap_size()/ (float)maximum_free_heep_size) * 100.0), esp_get_free_heap_size());
@@ -158,19 +156,78 @@ esp_err_t Main::init(void){
     ESP_LOGW(sys_up_tag, "\t>SENS: %s", user_cfg_basic.device_name);
     ESP_LOGW(sys_up_tag, "\t>WSOC: %s", user_cfg_basic.websoc_endpoint_url);
 
-    esp_err_t mcu_long_stat_presence = Nvs_Manager::get_nvs("mcu_long_stat", (void*)(&mcu_long_term_stats), sizeof(mcu_long_term_stat_t));
-    ESP_LOGW(sys_up_tag, "\tmcu_long_stat read: %s", ((ESP_OK == mcu_long_stat_presence) ? "FOUND" : "NOT FOUND"));
-    ESP_LOGW(sys_up_tag, "\t>PROG REFASH: %ld", mcu_long_term_stats.num_of_program_flash);
-    ESP_LOGW(sys_up_tag, "\t>SW RESET: %ld", mcu_long_term_stats.num_of_esp_swreset);
-    ESP_LOGW(sys_up_tag, "\t>SLEEP WAKE: %ld", mcu_long_term_stats.num_of_esp_sleep_wake);
-    ESP_LOGW(sys_up_tag, "\t>TOTAL UPTIME: %lld", mcu_long_term_stats.total_recorded_uptime_sec);
-    ESP_LOGW(sys_up_tag, "\t>TOTAL SLEEP TIME: %lld", mcu_long_term_stats.total_recorded_sleep_sec);
+    // esp_err_t mcu_long_stat_presence = Nvs_Manager::get_nvs("mcu_long_stat", (void*)(&mcu_long_term_stats), sizeof(mcu_long_term_stat_t));
+    // ESP_LOGW(sys_up_tag, "\tmcu_long_stat read: %s", ((ESP_OK == mcu_long_stat_presence) ? "FOUND" : "NOT FOUND"));
+    // ESP_LOGW(sys_up_tag, "\t>PROG REFASH: %ld", mcu_long_term_stats.num_of_program_flash);
+    // ESP_LOGW(sys_up_tag, "\t>SW RESET: %ld", mcu_long_term_stats.num_of_esp_swreset);
+    // ESP_LOGW(sys_up_tag, "\t>SLEEP WAKE: %ld", mcu_long_term_stats.num_of_esp_sleep_wake);
+    // ESP_LOGW(sys_up_tag, "\t>TOTAL UPTIME: %lld", mcu_long_term_stats.total_recorded_uptime_sec);
+    // ESP_LOGW(sys_up_tag, "\t>TOTAL SLEEP TIME: %lld", mcu_long_term_stats.total_recorded_sleep_sec);
 
-
-    if(ESP_RST_USB == esp_reset_reason()){
-        mcu_long_term_stats.num_of_program_flash++;
+    esp_err_t mcu_reboot_statistics_presence = Nvs_Manager::get_nvs("reboot_stats", (void*)(&reboot_statistics), sizeof(Nvs_Manager::reboot_statistics_t));
+    
+    if(ESP_RST_DEEPSLEEP != esp_reset_reason())
+    {
+        reboot_statistics.reboot_id++;
+        reboot_statistics.total_active_time_sec += reboot_statistics.active_time_since_reset_sec;
+        reboot_statistics.total_sleep_time_sec += reboot_statistics.sleep_time_since_reset_sec;
     }
 
+    reboot_statistics.active_time_since_reset_sec = nv_mcu_awake_sec;
+    reboot_statistics.sleep_time_since_reset_sec = nv_mcu_sleep_sec;
+
+    if((reboot_statistics.active_time_since_reset_sec + reboot_statistics.sleep_time_since_reset_sec) > reboot_statistics.record_up_time){
+        reboot_statistics.record_up_time = reboot_statistics.active_time_since_reset_sec + reboot_statistics.sleep_time_since_reset_sec;
+    }
+
+    switch(esp_reset_reason()){
+        case ESP_RST_USB:
+        {
+            reboot_statistics.numof_usb_reset++;
+            reboot_statistics.numof_wake_since_reset = 0;
+        }
+        break;
+
+        case ESP_RST_PANIC:
+        {
+            reboot_statistics.numof_panic_reset++;
+            reboot_statistics.numof_wake_since_reset = 0;
+        }
+        break;
+
+        case ESP_RST_BROWNOUT:
+        {
+            reboot_statistics.numof_brown_out_reset++;
+            reboot_statistics.numof_wake_since_reset = 0;
+        }
+        break;
+
+        case ESP_RST_DEEPSLEEP:
+        {
+            reboot_statistics.numof_wake_since_reset++;
+        }
+        break;
+
+        default:
+        {
+            reboot_statistics.numof_wake_since_reset = 0;
+        }
+        break;
+    }
+
+    ESP_LOGW(sys_up_tag, "\treboot_stats read: %s", ((ESP_OK == mcu_reboot_statistics_presence) ? "FOUND" : "NOT FOUND"));
+    ESP_LOGW(sys_up_tag, "\t>USB RST %ld", reboot_statistics.numof_usb_reset);
+    ESP_LOGW(sys_up_tag, "\t>BROWN OUT RST: %ld", reboot_statistics.numof_brown_out_reset);
+    ESP_LOGW(sys_up_tag, "\t>PANIC RST: %ld", reboot_statistics.numof_panic_reset);
+    ESP_LOGW(sys_up_tag, "\t>NUMOF WAKE: %ld",reboot_statistics.numof_wake_since_reset);
+
+    ESP_LOGW(sys_up_tag, "\t>UPTIME SINCE RST: %lld, (%0.2f percent in sleep)",(reboot_statistics.active_time_since_reset_sec + reboot_statistics.sleep_time_since_reset_sec), (100 * ((float)(reboot_statistics.sleep_time_since_reset_sec)/(reboot_statistics.active_time_since_reset_sec + reboot_statistics.sleep_time_since_reset_sec))));
+    ESP_LOGW(sys_up_tag, "\t>UPTIME TOTAL: %lld (%0.2f percent in sleep)",(reboot_statistics.total_active_time_sec + reboot_statistics.total_sleep_time_sec), (100 * ((float)(reboot_statistics.total_sleep_time_sec)/(reboot_statistics.total_active_time_sec + reboot_statistics.total_sleep_time_sec))));
+    ESP_LOGW(sys_up_tag, "\t>RECORD UP TIME: %lld",reboot_statistics.record_up_time);
+    ESP_LOGW(sys_up_tag, "\t>REBOOT ID: %lld",reboot_statistics.reboot_id);
+
+    Nvs_Manager::set_nvs("reboot_stats", &reboot_statistics, sizeof(Nvs_Manager::reboot_statistics_t));
+  
     /* shutdown handler will run before every SWRESET*/
     esp_register_shutdown_handler(at_shutdown);
     
@@ -296,11 +353,14 @@ esp_err_t Main::init(void){
     {
         tail_bmx280.begin(i2c_driver_I2C0, 0x77, "BMX0", 19.0);
         onboard_bmx280.begin(i2c_driver_I2C0, 0x76, "BMX1", 19.0);
-        ccs811_sensor.begin(i2c_driver_I2C0, 0x5A);
         hall_angle_sensor.begin(i2c_driver_I2C0, 0x36);
-
         hall_angle_sensor.init();
-        ccs811_sensor.init();
+        
+        ccs811_sensor.begin(i2c_driver_I2C0, 0x5A);
+        /*ccs811_sensor.init();*/
+        ccs811_sensor.read_measurement(0, 0);
+
+        
         
         gpio_reset_pin(GPIO_NUM_7);
         gpio_set_direction(GPIO_NUM_7, GPIO_MODE_OUTPUT);
@@ -315,10 +375,21 @@ esp_err_t Main::init(void){
         };
         gpio_config(&io_conf);
 
-    
+        #ifdef WINDSENS_EN
         wind_hall.configure_as_frequency_input();
         rain_hall.configure_as_frequency_input();
+        #endif
         hall_angle_sensor.init();
+    }
+
+    hive_scale.init(GPIO_NUM_4, GPIO_NUM_2);
+    hive_scale.tare(100);
+    hive_scale.set_scale(1708.3, 1567.0/*, 229491.0000*/);
+
+    while(true){
+        int32_t raw_scale = hive_scale.read_raw();
+        ESP_LOGE("scale", "raw value: %ld, processed value: %0.2f", raw_scale, hive_scale.read(1/*20*/));
+        vTaskDelay(10/portTICK_PERIOD_MS);
     }
 
     return (esp_err_t)ESP_OK;
@@ -329,34 +400,27 @@ bool rdy_to_report = false;
 
 void Main::loop(void){
 
-    auto [mcu_time_unix, time_reliability, now_tm] = Ntp_time::evaluate_mcu_rtc();
+    auto [mcu_time_unix, time_reliability, now_tm] = Ntp_time::evaluate_mcu_rtc(true);
     time_t now_sys_uptime_secs = (esp_timer_get_time()/1000);
 
     if(ESP_OK == i2c_num0_init_result)
     {
-        //float hall_voltage = continous_adc_manager.read_dc_voltage_on_channel(GPIO_NUM_4);
-        //int hall_voltage = gpio_get_level(GPIO_NUM_4);
-        //ESP_LOGI("hall:", "DC voltage: %d", hall_voltage);
-        //vTaskDelay(50/portTICK_PERIOD_MS);
         tail_bmx280.read();
         onboard_bmx280.read();
-        hall_angle_sensor.read_wind_angle();
+        
     
-
+        #ifdef WINDSENS_EN
+        hall_angle_sensor.read_wind_angle();
         //ESP_LOGI("rpmHall"," high/low [%lld:%lld] %0.2f, lowhigh ratio: %0.2f", raw_pulse_high_us/1000, raw_pulse_low_us/1000, 1000000.0/((raw_pulse_high_us) + (raw_pulse_low_us)), (1.0 * raw_pulse_low_us)/(1.0 * raw_pulse_high_us));
         wind_hall.dbgPrint();
         rain_hall.dbgPrint();
-        //vTaskDelay(100/portTICK_PERIOD_MS);
-
-        //return;
-
-        /*tail_bmx280.read();*/
-        
+        #endif
         ccs811_sensor.read_measurement(onboard_bmx280.temperature, onboard_bmx280.humidity);
-        //ccs811_read_sensor(&ccs811_mox_sensor);
     }
-    
-    
+
+    int32_t raw_scale = hive_scale.read_raw();
+    ESP_LOGE("scale", "raw value: %ld, processed value: %0.2f", raw_scale, hive_scale.read(20));
+
     mcu_info.update_mcu_telemetry();
     mcu_info.set_bat_voltage(continous_adc_manager.read_dc_voltage_on_channel(GPIO_NUM_1));
 
@@ -368,8 +432,6 @@ void Main::loop(void){
         reset_id_rtcmem += 100 * (uint16_t)(now_tm.tm_min);
         reset_id_rtcmem += 10000 * (uint16_t)(now_tm.tm_hour);
     }
-
-    //ESP_LOGI("reset_id", "%d:%d", (reset_id_rtcmem), (reset_id_general_mem));
 
     if ((Ntp_time::rtc_time_sts_t::Not_synced_usable == time_reliability) || (Ntp_time::rtc_time_sts_t::OK == time_reliability))
     {
@@ -472,20 +534,25 @@ void Main::loop(void){
                     snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
                     report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
 
+                    hive_scale.get_service_data_report(mqtt_service_data_buffer, 2048);
+                    ESP_LOGD("service_data", "%s", mqtt_service_data_buffer);
+                    snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
+                    report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
+
                     wind_hall.pulse_low_us = 0;
                     wind_hall.pulse_high_us = 0;
                     wind_hall.edge_count = 0;
 
-
                     ESP_LOGI("hello", "awake vs sleep seconds: %lld : %lld", nv_mcu_awake_sec, nv_mcu_sleep_sec);
-
-                    //night_man.update_awake_time();
-                    //night_man.schedule_rtc_wakeup(30000);
-                    //night_man.enter_deep_sleep();
                 }
+
                 ha_websoc.disconnect();
                 rdy_to_report = false;
 
+                vTaskDelay(200/portTICK_PERIOD_MS);
+                night_man.update_awake_time();
+                night_man.schedule_rtc_wakeup(90 * 1000);
+                night_man.enter_deep_sleep();
                 /*wlan_interface.fastScan();*/
                 
             }
@@ -533,9 +600,9 @@ void Main::loop(void){
     /*ccs811_read_sensor(&ccs811_mox_sensor);*/
 
     float bat_voltage = continous_adc_manager.read_dc_voltage_on_channel(GPIO_NUM_1);
-    ESP_LOGI("BAT:", "DC voltage: %0.2f", bat_voltage);
+    ESP_LOGI(COLOR_PINK"BAT:"COLOR_WHITE, "DC voltage: %0.2f", bat_voltage);
     float ldr_voltage = continous_adc_manager.read_dc_voltage_on_channel(GPIO_NUM_0);
-    ESP_LOGI("LDR:", "DC voltage: %0.2f", ldr_voltage);
+    ESP_LOGI(COLOR_PINK"LDR:"COLOR_WHITE, "DC voltage: %0.2f", ldr_voltage);
 
     night_man.update_awake_time();
 
