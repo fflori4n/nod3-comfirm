@@ -4,7 +4,7 @@ class HX711 {
 
     
 
-    static constexpr uint16_t numof_raw_multisample{4};
+    static constexpr uint16_t numof_raw_multisample{11};
     static constexpr uint16_t raw_multisample_delay_ms{1000/80}; /* maximum rate is either 10Hz or 80Hz depending on HX711 - will try to implement a sort of dithering or jitter sampling to see if it makes any improvement */
     static constexpr uint16_t multisample_delay_ms{raw_multisample_delay_ms * numof_raw_multisample * 3};
     static constexpr float default_tare_offset{232450.0000};
@@ -36,85 +36,121 @@ void init(const gpio_num_t& dout, const gpio_num_t& clk) {
     gpio_set_direction(dout_pin, GPIO_MODE_INPUT);
 }
 
+inline uint8_t gpio_wait_for_low(const gpio_num_t& gpio_pin, const uint16_t& debounce_us, const uint16_t& timeout_us)
+{
+    uint16_t debounce_counter = 0;
+
+    for(uint16_t i = 0; i < timeout_us; i++)
+    {
+        if(0u == gpio_get_level(gpio_pin))
+        {
+            debounce_counter++;
+            debounce_counter &= ~(1u<<15);
+        }
+        else
+        {
+            debounce_counter = 0;
+        }
+
+        if(debounce_counter > debounce_us)
+        {
+            return 0;
+        }
+        esp_rom_delay_us(1);
+    }
+
+    return 3u;
+}
+
 int32_t read_raw(void)
 {
-
-    
-    time_t raw_reading_start = esp_timer_get_time();
+    /*time_t raw_reading_start = esp_timer_get_time();*/
     int32_t result = 0;
     int32_t data = 0;
-    uint16_t noresp = 0;
+    int32_t raw_measurements[numof_raw_multisample] = {0u};
 
+    /*gpio_set_level(clk_pin, 0);*/
 
     for (uint16_t i = 0; i < numof_raw_multisample; )
     {
-        
-        data = 0;
-        noresp = 0;
-        uint16_t deb = 0;
-        do{
-            if(0u == gpio_get_level(dout_pin)){
-                deb++;
+        if (0u == gpio_wait_for_low(dout_pin, 10, 5000))
+        {
+            esp_rom_delay_us(100);
+
+            data = 0;
+            for (int i = 0; i < 25; i++)
+            {
+                gpio_set_level(clk_pin, 1);
+                esp_rom_delay_us(1);
+                if(i < 24)
+                {
+                    data = (data << 1) | gpio_get_level(dout_pin);
+                }
+                else
+                {
+                    /* do not sample. This is the 25th pulse to set gain = 128 */
+                }
+                gpio_set_level(clk_pin, 0);
+                esp_rom_delay_us(1);
+            }
+
+            /* NOTE: according to datasheet: MAX:0x7FFFFF, MIN:0x800000, sometimes when incorrect reading it will also return 0xFFFFFF*/
+            if(data < 0x800000)
+            {
+                raw_measurements[i] = data;
+                i++;
+                /*ESP_LOGI("SCALE","num %d - raw reading is: %ld", i, data);*/
             }
             else{
-                deb = 0;
+                ESP_LOGE("SCALE","glitch");
             }
-            esp_rom_delay_us(1);
-            noresp++;
-
-        }while((deb < 100) && (noresp < 10000));
-
-        for (int i = 0; i < 24; i++)
+        }
+        else
         {
-            gpio_set_level(clk_pin, 1);
-            esp_rom_delay_us(1);
-            data = (data << 1) | gpio_get_level(dout_pin);
-            gpio_set_level(clk_pin, 0);
-            esp_rom_delay_us(1);
+            /*ESP_LOGW("SCALE","wait sync");*/
+            vTaskDelay(10/portTICK_PERIOD_MS);
         }
-
-        // Set gain = 128 (25 clock pulses total)
-        gpio_set_level(clk_pin, 1);
-        esp_rom_delay_us(1);
-        gpio_set_level(clk_pin, 0);
-        esp_rom_delay_us(1);
-
-        if (noresp <= 10000)
-        {
-            result = (result + data) / 2.0;
-            i++;
-            ESP_LOGI("SCALE","raw reading is: %ld", data);
-        }
-        else{
-            ESP_LOGI("SCALE","failed to sync");
-        }
-
-        
-
-        int random_in_range = (esp_random() % (raw_multisample_delay_ms - 1));
-        vTaskDelay((random_in_range) / portTICK_PERIOD_MS);
+        /*ESP_LOGI("SCALE","delay: %d", ((2 * raw_multisample_delay_ms) + random_in_range));*/
     }
+
+    std::sort(raw_measurements, raw_measurements + numof_raw_multisample);
+    int32_t mediaverage_filt = (raw_measurements[1] + raw_measurements[2] + raw_measurements[3] + raw_measurements[4] + raw_measurements[5] + raw_measurements[6] + raw_measurements[7] + + raw_measurements[8] + raw_measurements[9]) / 9;
+    /*int32_t mediaverage_filt = (raw_measurements[2] + raw_measurements[3] + raw_measurements[4] + raw_measurements[5] + raw_measurements[6] + raw_measurements[7] + + raw_measurements[8]) / 7;*/
+    /*int32_t mediaverage_filt = (raw_measurements[3] + raw_measurements[4] + raw_measurements[5] + raw_measurements[6] + raw_measurements[7]) / 5;*/
+    /*int32_t mediaverage_filt = (raw_measurements[4] + raw_measurements[5] + raw_measurements[6]) / 3;*/
+
+    result = mediaverage_filt;
+    // for(int32_t val : raw_measurements)
+    // {
+    //     ESP_LOGI("SCALE","raw reading is: %ld", val);
+    // }
+    //  ESP_LOGI("SCALE","**** **** **** ****");
 
     // Convert to signed 24-bit
     if (result & 0x800000)
     {
         result |= ~0xFFFFFF;
     }
-
-    //ESP_LOGI("SCALE","raw reading executed in: %lld us %d", (esp_timer_get_time() - raw_reading_start));
-    
-
+    /*ESP_LOGI("SCALE","raw reading executed in: %lld us %d", (esp_timer_get_time() - raw_reading_start));*/
     return result;
 }
 
 float read(uint16_t multisample = 4) {
+
+    ESP_LOGW("SCALE","power on");
+    gpio_set_level(clk_pin, 0);
+    vTaskDelay(400);
 
     for(uint16_t i =0; i < multisample; i++){
         float new_weight = ((float)read_raw()- offset) / scale;
         filtered_weight_g = weighted_exp_filter(new_weight, filtered_weight_g, 1.0/multisample, -10000.0f);
         measurement_variance_g = weighted_exp_filter(abs(new_weight - filtered_weight_g), measurement_variance_g, 1.0/multisample, 0.0f);
     }
-    ESP_LOGI("SCALE","filtered base: %0.2f, variance: %0.2f", filtered_weight_g, measurement_variance_g);
+
+    ESP_LOGW("SCALE","power down");
+    gpio_set_level(clk_pin, 1);
+
+    ESP_LOGW("SCALE","filtered base: %0.2f, variance: %0.2f", filtered_weight_g, measurement_variance_g);
     return filtered_weight_g;
 }
 

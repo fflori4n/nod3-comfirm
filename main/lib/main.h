@@ -102,8 +102,7 @@
 #include "digio_manager/digio.h"
 #include "as5600/as5600.h"
 #include "hx711/hx711.h"
-
-
+#include "ds18b20/ds18b20.h"
 
 class Main final{
 public:

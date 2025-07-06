@@ -383,14 +383,18 @@ esp_err_t Main::init(void){
     }
 
     hive_scale.init(GPIO_NUM_4, GPIO_NUM_2);
-    hive_scale.tare(100);
-    hive_scale.set_scale(1708.3, 1567.0/*, 229491.0000*/);
+    /*hive_scale.tare(50);*/
+    hive_scale.set_scale(1208.56, 1009.0, 243531.25);
 
-    while(true){
-        int32_t raw_scale = hive_scale.read_raw();
-        ESP_LOGE("scale", "raw value: %ld, processed value: %0.2f", raw_scale, hive_scale.read(1/*20*/));
-        vTaskDelay(10/portTICK_PERIOD_MS);
-    }
+    // while(true){
+    //     /*int32_t raw_scale = hive_scale.read_raw();*/
+    //     ESP_LOGE("scale", "hx711 weight: %0.2f",hive_scale.read(30));
+        
+    // }
+
+    DS18B20::discover_ds18_on_one_wire();
+    DS18B20::read_all_sensors();
+    ESP_LOGI("DS18B20", "pcb temp:%0.2f°C Scale temp:%0.2f°C", DS18B20::get_last_measurement(ds18temp_addr_pcb), DS18B20::get_last_measurement(ds18temp_addr_scale));
 
     return (esp_err_t)ESP_OK;
 }
@@ -418,8 +422,11 @@ void Main::loop(void){
         ccs811_sensor.read_measurement(onboard_bmx280.temperature, onboard_bmx280.humidity);
     }
 
-    int32_t raw_scale = hive_scale.read_raw();
-    ESP_LOGE("scale", "raw value: %ld, processed value: %0.2f", raw_scale, hive_scale.read(20));
+    /*int32_t raw_scale = hive_scale.read_raw();*/
+    DS18B20::read_all_sensors();
+    ESP_LOGI(DS18B20::log_label_ds18b20, "pcb temp:%0.2f°C Scale temp:%0.2f°C", DS18B20::get_last_measurement(ds18temp_addr_pcb), DS18B20::get_last_measurement(ds18temp_addr_scale));
+
+    ESP_LOGE("scale", "processed value: %0.2f", hive_scale.read(30));
 
     mcu_info.update_mcu_telemetry();
     mcu_info.set_bat_voltage(continous_adc_manager.read_dc_voltage_on_channel(GPIO_NUM_1));
@@ -539,6 +546,11 @@ void Main::loop(void){
                     snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
                     report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
 
+                    DS18B20::get_service_data_report(mqtt_service_data_buffer, 2048);
+                    ESP_LOGD("service_data", "%s", mqtt_service_data_buffer);
+                    snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
+                    report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
+
                     wind_hall.pulse_low_us = 0;
                     wind_hall.pulse_high_us = 0;
                     wind_hall.edge_count = 0;
@@ -551,7 +563,7 @@ void Main::loop(void){
 
                 vTaskDelay(200/portTICK_PERIOD_MS);
                 night_man.update_awake_time();
-                night_man.schedule_rtc_wakeup(90 * 1000);
+                night_man.schedule_rtc_wakeup(40 * 1000);
                 night_man.enter_deep_sleep();
                 /*wlan_interface.fastScan();*/
                 

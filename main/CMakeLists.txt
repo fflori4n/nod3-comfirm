@@ -12,4 +12,6 @@ idf_component_register(SRCS "main.cpp"
                     driver
                     esp_adc
                     esp_http_server
+                    ds18x20
+                    onewire
                     )
