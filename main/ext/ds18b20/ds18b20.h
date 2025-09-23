@@ -1,9 +1,13 @@
 #include <esp_err.h>
 #include "onewire.h"
 #include "ds18x20.h"
+#include <cmath>
 
 constexpr onewire_addr_t ds18temp_addr_pcb{0x453ce1e38127f328};
 constexpr onewire_addr_t ds18temp_addr_scale{0x703ce1e380ae4428};
+
+float ds18_onboard_last_measurement = -100;
+float ds18_scale_last_measurement = -100;
 
 namespace DS18B20 {
 
@@ -85,7 +89,7 @@ namespace DS18B20 {
             // Wait for a little bit between each sample (note that the
             // ds18x20_measure_and_read_multi operation already takes at
             // least 750ms to run, so this is on top of that delay).
-            vTaskDelay(pdMS_TO_TICKS(delay_ms));
+            //vTaskDelay(pdMS_TO_TICKS(delay_ms));
         }
         return res;
     }
@@ -112,7 +116,12 @@ namespace DS18B20 {
         report.add_float_report_item("ds_pcb", (float)get_last_measurement(ds18temp_addr_pcb), -40.0f, 250.0f);
         report.add_float_report_item("ds_scale", (float)get_last_measurement(ds18temp_addr_scale), -40.0f, 250.0f);
 
+
         int16_t res = snprintf(text_buffer, text_buffer_size, "%s", report.get_service_data_buffer().c_str());
+
+        
+        
+        //test_report.dbg_print_vector();
 
         if ((res < 0) || (res >= text_buffer_size))
         {
@@ -121,31 +130,16 @@ namespace DS18B20 {
         return ESP_OK;
 
     }
-};
 
+    esp_err_t add_to_report(Report_builder& report_buildr)
+    {
+        ds18_onboard_last_measurement = get_last_measurement(ds18temp_addr_pcb);
+        ds18_scale_last_measurement = get_last_measurement(ds18temp_addr_scale);
 
-
-
-  
-
-
-
-
-
-    // There is no special initialization required before using the ds18x20
-    // routines.  However, we make sure that the internal pull-up resistor is
-    // enabled on the GPIO pin so that one can connect up a sensor without
-    // needing an external pull-up (Note: The internal (~47k) pull-ups of the
-    // ESP do appear to work, at least for simple setups (one or two sensors
-    // connected with short leads), but do not technically meet the pull-up
-    // requirements from the ds18x20 datasheet and may not always be reliable.
-    // For a real application, a proper 4.7k external pull-up resistor is
-    // recommended instead!)
-    /*gpio_set_pull_mode(SENSOR_GPIO, GPIO_PULLUP_ONLY);*/
-
+        report_buildr.add_keyval(Report_group_e::DEV_INFO, "ds_pcb", (void*)&ds18_onboard_last_measurement,Type_e::FLOAT32, {-40.0f, 250.0f});
+        report_buildr.add_keyval(Report_group_e::SENSOR_HIVE_WEIGHT, "ds_scale", (void*)&ds18_scale_last_measurement,Type_e::FLOAT32, {-40.0f, 250.0f});
     
-
-        
-
-        // Do a number of temperature samples, and print the results.
+        return ESP_OK;
+    }
+};
         

@@ -86,7 +86,7 @@ class Sleep_manager{
         
         if(0 != nv_last_deep_sleep_entered_exited_at_unix){
             ESP_LOGW("NIGHTMAN", "MCU was awake for: %lld seconds. Uptime logged.", (mcu_time_now_unix - nv_last_deep_sleep_entered_exited_at_unix));
-            nv_mcu_awake_sec = mcu_time_now_unix - nv_last_deep_sleep_entered_exited_at_unix;
+            nv_mcu_awake_sec = (esp_timer_get_time()/1000000);/*mcu_time_now_unix - nv_last_deep_sleep_entered_exited_at_unix;*/
         }
         else if(Ntp_time::rtc_time_sts_t::OK == time_reliability){
             /* when there was no valid NTP time at last wake stup (after reset or poweron), deep sleep exited was set as 0. Now check if we have valid NTP time, and set last deep sleep exited retroactively */
@@ -104,25 +104,7 @@ class Sleep_manager{
         auto [mcu_time_now_unix, time_reliability, mcu_time_tm] = Ntp_time::evaluate_mcu_rtc();
         (void)mcu_time_tm;
 
-        if ((Ntp_time::rtc_time_sts_t::Not_synced_usable == time_reliability) || (Ntp_time::rtc_time_sts_t::OK == time_reliability))
-        {
-            if(0 != nv_last_deep_sleep_entered_exited_at_unix)
-            {
-                ESP_LOGW("NIGHTMAN", "MCU was awake for: %lld seconds, now setting unix deep sleep started at to current time.", (mcu_time_now_unix - nv_last_deep_sleep_entered_exited_at_unix));
-                nv_mcu_awake_sec += (mcu_time_now_unix - nv_last_deep_sleep_entered_exited_at_unix);
-                nv_last_deep_sleep_entered_exited_at_unix = mcu_time_now_unix;
-            }
-            else
-            {
-                ESP_LOGW("NIGHTMAN", "MCU was awake for: [unknown] seconds, now setting unix deep sleep started at to current time.");
-                nv_last_deep_sleep_entered_exited_at_unix = mcu_time_now_unix;
-            }     
-        }
-        else
-        {
-            ESP_LOGW("NIGHTMAN", "could't get valid time before deep sleep start!");
-            nv_last_deep_sleep_entered_exited_at_unix = 0;
-        }
+        
 
         ESP_LOGW("NIGHTMAN", "**** **** **** **** **** **** **** ****");
         ESP_LOGW("NIGHTMAN", "ESP IS READY TO ENTER DEEP SLEEP WITH THE FOLLOWING CONFIG:");
@@ -132,6 +114,33 @@ class Sleep_manager{
         else{
              ESP_LOGW("NIGHTMAN", "TIMER WAKE: [ disabled ]");
         }
+
+        //esp_sleep_enable_uart_wakeup(/*UART_NUM_0*/ 0u);
+        //esp_deep_sleep_enable_gpio_wakeup(GPIO_NUM_20, ESP_GPIO_WAKEUP_GPIO_HIGH);
+
+        if ((Ntp_time::rtc_time_sts_t::Not_synced_usable == time_reliability) || (Ntp_time::rtc_time_sts_t::OK == time_reliability))
+        {
+            // if(0 != nv_last_deep_sleep_entered_exited_at_unix)
+            // {
+
+                nv_last_deep_sleep_entered_exited_at_unix = mcu_time_now_unix;
+            // }
+            // else
+            // {
+            //     ESP_LOGW("NIGHTMAN", "MCU was awake for: [unknown] seconds, now setting unix deep sleep started at to current time.");
+            //     nv_last_deep_sleep_entered_exited_at_unix = mcu_time_now_unix;
+            //     nv_mcu_awake_sec += (esp_timer_get_time()/1000000);
+            // }     
+        }
+        else
+        {
+            ESP_LOGW("NIGHTMAN", "could't get valid time before deep sleep start!");
+            nv_last_deep_sleep_entered_exited_at_unix = 0;
+        }
+
+        ESP_LOGW("NIGHTMAN", "MCU was awake for: [RTC: %lld, ESP_timer: %lld] seconds, now setting unix deep sleep started at to current time.", (mcu_time_now_unix - nv_last_deep_sleep_entered_exited_at_unix), (uint64_t)(esp_timer_get_time()/1000000));
+        nv_mcu_awake_sec += (esp_timer_get_time()/1000000);/*(mcu_time_now_unix - nv_last_deep_sleep_entered_exited_at_unix);*/
+        
         ESP_LOGW("NIGHTMAN", "**** **** **** **** **** **** **** ****");
         ESP_LOGW("NIGHTMAN", "ESP IS ENTERING DEEP SLEEP NOW");
         ESP_LOGW("NIGHTMAN", "**** **** **** **** **** **** **** ****");

@@ -186,6 +186,14 @@ void set_scale(float calib_measured_value_g, float real_value_g, float tare_offs
         }
         return ESP_OK;
     }
+
+    esp_err_t add_to_report(Report_builder& report_buildr){
+
+        report_buildr.add_keyval(Report_group_e::SENSOR_HIVE_WEIGHT, "weight_g", (void*)&(this->filtered_weight_g), Type_e::FLOAT32, {-200.0f, 100000.0f});
+        report_buildr.add_keyval(Report_group_e::SENSOR_HIVE_WEIGHT, "wvar_g", (void*)&(this->measurement_variance_g), Type_e::FLOAT32, {-40.0f, 50.0f});
+        
+        return ESP_OK;
+    }
 };
 
 HX711 hive_scale;

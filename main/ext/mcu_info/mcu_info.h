@@ -95,6 +95,15 @@ public:
     float bat_voltage;
     float ldr_mcu;
 
+    float statistics_hours_since_reset;
+    float statistics_active_time_since_reset;
+    float upboot_record;
+    float uptime_total;
+    float total_sleep_ratio;
+    float sleep_ratio;
+
+    uint32_t minimum_heap;
+
     private:
 
     /* TODO:  esp_register_shutdown_handler()  seems cool*/
@@ -283,6 +292,36 @@ RTC_FAST_ATTR uint64_t nv_mcu_awake_sec;*/
         }
         return ESP_OK;
 
+    }
+
+    esp_err_t add_to_report(Report_builder &report_buildr)
+    {
+
+        statistics_hours_since_reset = (float)((nv_mcu_sleep_sec + nv_mcu_awake_sec)/3600.0);
+        statistics_active_time_since_reset = (float)((reboot_statistics.active_time_since_reset_sec + reboot_statistics.sleep_time_since_reset_sec)/3600.0);
+        upboot_record = (float)((reboot_statistics.record_up_time)/3600.0);
+        uptime_total = (float)((reboot_statistics.total_active_time_sec + reboot_statistics.total_sleep_time_sec)/3600.0);
+        sleep_ratio =(float)(100 * ((float)(reboot_statistics.sleep_time_since_reset_sec)/(reboot_statistics.active_time_since_reset_sec + reboot_statistics.sleep_time_since_reset_sec + 0.01)));
+        total_sleep_ratio = (float)(100 * ((float)(reboot_statistics.total_sleep_time_sec)/(reboot_statistics.total_active_time_sec + reboot_statistics.total_sleep_time_sec  + 0.01)));
+        //Ntp_time::get_sol();
+        minimum_heap = esp_get_minimum_free_heap_size();
+
+        report_buildr.add_keyval(Report_group_e::DEV_INFO, "mcu_tmreset",           (void*)&statistics_hours_since_reset, Type_e::FLOAT32, {0.0f, (100 * 365 * 24)});
+        report_buildr.add_keyval(Report_group_e::DEV_INFO, "mcu_temp",              (void*)&(chip_internal_temp_degc),  Type_e::FLOAT32, {-40.0f, 200.0f});
+        report_buildr.add_keyval(Report_group_e::DEV_INFO, "mcu_rst",               (void*)(reset_reason_to_string(esp_reset_reason())), Type_e::PCHAR_STR);
+        report_buildr.add_keyval(Report_group_e::DEV_INFO, "mcu_sol",               (void*)&(Ntp_time::sol), Type_e::INT32, {0, (100 * 365)});
+        report_buildr.add_keyval(Report_group_e::DEV_INFO, "mcu_minmem",            (void*)&minimum_heap, Type_e::INT32, {0, 20000000});
+        report_buildr.add_keyval(Report_group_e::DEV_INFO, "mcu_rstid",             (void*)&(reboot_statistics.reboot_id), Type_e::INT32, {0, 0xFFFFFFFFFFFFFFFF});
+        report_buildr.add_keyval(Report_group_e::DEV_INFO, "mcu_wknum",             (void*)&(reboot_statistics.numof_wake_since_reset), Type_e::INT32, {0, 0xFFFFFFFFFFFFFFFF});
+        report_buildr.add_keyval(Report_group_e::DEV_INFO, "mcu_upboot",            (void*)&(statistics_active_time_since_reset), Type_e::FLOAT32, {0, 0xFFFFFFFFFFFFFFFF});
+        report_buildr.add_keyval(Report_group_e::DEV_INFO, "mcu_upbootrecord",      (void*)&upboot_record, Type_e::FLOAT32, {0, 0xFFFFFFFFFFFFFFFF});
+        report_buildr.add_keyval(Report_group_e::DEV_INFO, "mcu_uptotal",           (void*)&uptime_total, Type_e::FLOAT32, {0, 0xFFFFFFFFFFFFFFFF});
+        report_buildr.add_keyval(Report_group_e::DEV_INFO, "mcu_sleepratio",        (void*)&sleep_ratio, Type_e::FLOAT32, {0.001f, 100.0f});
+        report_buildr.add_keyval(Report_group_e::DEV_INFO, "mcu_totalsleepratio",   (void*)&sleep_ratio, Type_e::FLOAT32, {0.001f, 100.0f});
+        report_buildr.add_keyval(Report_group_e::DEV_INFO, "mcu_batv",              (void*)&(bat_voltage), Type_e::FLOAT32, {0.01f, 30.0f});
+        report_buildr.add_keyval(Report_group_e::DEV_INFO, "mcu_chargev",           (void*)&(ldr_mcu), Type_e::FLOAT32, {0.01f, 30.0f});
+        
+        return ESP_OK;
     }
 
     static constexpr time_t report_cycle_time_sec{60 * 2};  /* only report if last report is older than 5 mins. */

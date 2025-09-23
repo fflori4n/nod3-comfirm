@@ -10,15 +10,25 @@
 #include "lib/main.h"
 #include <esp_wifi.h>
 
+/* macro for printing timestamps for debugging, kind of sketchy*/
+#define SEC_TO_TIMESTAMP_PRINT(T) \
+    (uint16_t)((T) / (365 * 24 * 3600)),                               /* years */ \
+    (uint16_t)(((T) % (365 * 24 * 3600)) / (30 * 24 * 3600)),          /* months */ \
+    (uint16_t)(((T) % (30 * 24 * 3600)) / (24 * 3600)),                /* days */ \
+    (uint16_t)(((T) % (24 * 3600)) / 3600),                            /* hours */ \
+    (uint16_t)(((T) % 3600) / 60),                                     /* minutes */ \
+    (uint16_t)((T) % 60)                                               /* seconds */
+
+constexpr static char* sys_up_tag{COLOR_GRAY "SYS-UP" COLOR_WHITE};
+constexpr static char* usr_cfg_tag{COLOR_GRAY "USR_CFG" COLOR_WHITE};
+constexpr static char* i2c_tag{COLOR_GRAY "I2C" COLOR_WHITE};
+
 esp_chip_info_t mcu_type_information;
 
-/*MCUInfo mcuInfo;*/
 Ntp_time ntpTime;
 MCUInfo mcu_info;
 Sleep_manager night_man;
 AS5600 hall_angle_sensor;
-
-esp_err_t i2c_num0_init_result = ESP_FAIL;
 
 Digio_pin wind_hall(GPIO_NUM_4);
 Digio_pin rain_hall(GPIO_NUM_3);
@@ -29,12 +39,14 @@ bmx280_sensor onboard_bmx280;
 /*ADC_input ldr_resistor(ADC_UNIT_1,ADC_CHANNEL_4);*/
 Homeassistant_websocket ha_websoc;
 
-/* ID of active I2C interface, it will be I2C_NUM_MAX if port is not initialized or not usable for some reason */
-i2c_port_t i2c_driver_I2C0 = I2C_NUM_MAX;
+esp_err_t i2c_num0_init_result = ESP_FAIL;
+i2c_port_t i2c_driver_I2C0 = I2C_NUM_MAX; /* SET ID of active I2C interface, it will be I2C_NUM_MAX if port is not initialized or not usable for some reason */
 
 char msg[2048];
 char mqtt_service_data_buffer[2048] = {};
 AC_current_measurement c0_current_sensor;
+
+Report_builder sensor_measurement_report;
 
 typedef struct mcu_long_term_stat_t{
 
@@ -57,8 +69,6 @@ extern "C" void app_main(void)
 
     maximum_free_heep_size = esp_get_free_heap_size();
 
-    
-    
     /* first check flash, if it does not initialize all kind of functions will brake */
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -74,6 +84,7 @@ extern "C" void app_main(void)
         Main::loop();
     } 
 }
+
 void at_shutdown(){
 
         
@@ -87,15 +98,11 @@ void at_shutdown(){
         ESP_LOGW("USR_CFG", "ESP RDY FOR POWEROFF");
         ESP_LOGW("USR_CFG", "**** **** **** **** **** **** **** ****");
         ESP_LOGW("USR_CFG", "Device will reconnect on next wake...");
-    }
-
-constexpr static char* sys_up_tag{COLOR_GRAY "SYS-UP" COLOR_WHITE};
-constexpr static char* usr_cfg_tag{COLOR_GRAY "USR_CFG" COLOR_WHITE};
-constexpr static char* i2c_tag{COLOR_GRAY "I2C" COLOR_WHITE};
+}
 
 esp_err_t Main::init(void){
 
-     if(ESP_RST_PANIC == esp_reset_reason() || ESP_RST_USB == esp_reset_reason())
+    if(ESP_RST_PANIC == esp_reset_reason() || ESP_RST_USB == esp_reset_reason())
     {
         reset_id_general_mem = 0;
         reset_id_rtcmem = 0;
@@ -156,14 +163,6 @@ esp_err_t Main::init(void){
     ESP_LOGW(sys_up_tag, "\t>SENS: %s", user_cfg_basic.device_name);
     ESP_LOGW(sys_up_tag, "\t>WSOC: %s", user_cfg_basic.websoc_endpoint_url);
 
-    // esp_err_t mcu_long_stat_presence = Nvs_Manager::get_nvs("mcu_long_stat", (void*)(&mcu_long_term_stats), sizeof(mcu_long_term_stat_t));
-    // ESP_LOGW(sys_up_tag, "\tmcu_long_stat read: %s", ((ESP_OK == mcu_long_stat_presence) ? "FOUND" : "NOT FOUND"));
-    // ESP_LOGW(sys_up_tag, "\t>PROG REFASH: %ld", mcu_long_term_stats.num_of_program_flash);
-    // ESP_LOGW(sys_up_tag, "\t>SW RESET: %ld", mcu_long_term_stats.num_of_esp_swreset);
-    // ESP_LOGW(sys_up_tag, "\t>SLEEP WAKE: %ld", mcu_long_term_stats.num_of_esp_sleep_wake);
-    // ESP_LOGW(sys_up_tag, "\t>TOTAL UPTIME: %lld", mcu_long_term_stats.total_recorded_uptime_sec);
-    // ESP_LOGW(sys_up_tag, "\t>TOTAL SLEEP TIME: %lld", mcu_long_term_stats.total_recorded_sleep_sec);
-
     esp_err_t mcu_reboot_statistics_presence = Nvs_Manager::get_nvs("reboot_stats", (void*)(&reboot_statistics), sizeof(Nvs_Manager::reboot_statistics_t));
     
     if(ESP_RST_DEEPSLEEP != esp_reset_reason())
@@ -215,15 +214,16 @@ esp_err_t Main::init(void){
         break;
     }
 
+    esp_err_t mcu_long_stat_presence = Nvs_Manager::get_nvs("mcu_long_stat", (void*)(&mcu_long_term_stats), sizeof(mcu_long_term_stat_t));
     ESP_LOGW(sys_up_tag, "\treboot_stats read: %s", ((ESP_OK == mcu_reboot_statistics_presence) ? "FOUND" : "NOT FOUND"));
     ESP_LOGW(sys_up_tag, "\t>USB RST %ld", reboot_statistics.numof_usb_reset);
     ESP_LOGW(sys_up_tag, "\t>BROWN OUT RST: %ld", reboot_statistics.numof_brown_out_reset);
     ESP_LOGW(sys_up_tag, "\t>PANIC RST: %ld", reboot_statistics.numof_panic_reset);
     ESP_LOGW(sys_up_tag, "\t>NUMOF WAKE: %ld",reboot_statistics.numof_wake_since_reset);
 
-    ESP_LOGW(sys_up_tag, "\t>UPTIME SINCE RST: %lld, (%0.2f percent in sleep)",(reboot_statistics.active_time_since_reset_sec + reboot_statistics.sleep_time_since_reset_sec), (100 * ((float)(reboot_statistics.sleep_time_since_reset_sec)/(reboot_statistics.active_time_since_reset_sec + reboot_statistics.sleep_time_since_reset_sec))));
-    ESP_LOGW(sys_up_tag, "\t>UPTIME TOTAL: %lld (%0.2f percent in sleep)",(reboot_statistics.total_active_time_sec + reboot_statistics.total_sleep_time_sec), (100 * ((float)(reboot_statistics.total_sleep_time_sec)/(reboot_statistics.total_active_time_sec + reboot_statistics.total_sleep_time_sec))));
-    ESP_LOGW(sys_up_tag, "\t>RECORD UP TIME: %lld",reboot_statistics.record_up_time);
+    ESP_LOGW(sys_up_tag, "\t>UPTIME SINCE RST: %0.4d-%0.2d-%0.2d %0.2d:%0.2d:%0.2d (%0.2f percent in sleep)",SEC_TO_TIMESTAMP_PRINT(reboot_statistics.active_time_since_reset_sec + reboot_statistics.sleep_time_since_reset_sec),((100 * ((float)(reboot_statistics.sleep_time_since_reset_sec)/(reboot_statistics.active_time_since_reset_sec + reboot_statistics.sleep_time_since_reset_sec)))));
+    ESP_LOGW(sys_up_tag, "\t>UPTIME TOTAL: %0.4d-%0.2d-%0.2d %0.2d:%0.2d:%0.2d (%0.2f percent in sleep)",SEC_TO_TIMESTAMP_PRINT((reboot_statistics.total_active_time_sec + reboot_statistics.total_sleep_time_sec)), (100 * ((float)(reboot_statistics.total_sleep_time_sec)/(reboot_statistics.total_active_time_sec + reboot_statistics.total_sleep_time_sec))));
+    ESP_LOGW(sys_up_tag, "\t>RECORD UP TIME: %0.4d-%0.2d-%0.2d %0.2d:%0.2d:%0.2d",SEC_TO_TIMESTAMP_PRINT(reboot_statistics.record_up_time));
     ESP_LOGW(sys_up_tag, "\t>REBOOT ID: %lld",reboot_statistics.reboot_id);
 
     Nvs_Manager::set_nvs("reboot_stats", &reboot_statistics, sizeof(Nvs_Manager::reboot_statistics_t));
@@ -375,6 +375,7 @@ esp_err_t Main::init(void){
         };
         gpio_config(&io_conf);
 
+        #define WINDSENS_EN 1        
         #ifdef WINDSENS_EN
         wind_hall.configure_as_frequency_input();
         rain_hall.configure_as_frequency_input();
@@ -407,6 +408,13 @@ void Main::loop(void){
     auto [mcu_time_unix, time_reliability, now_tm] = Ntp_time::evaluate_mcu_rtc(true);
     time_t now_sys_uptime_secs = (esp_timer_get_time()/1000);
 
+    mcu_info.update_mcu_telemetry();
+    mcu_info.set_bat_voltage(continous_adc_manager.read_dc_voltage_on_channel(GPIO_NUM_1));
+    float bat_voltage = continous_adc_manager.read_dc_voltage_on_channel(GPIO_NUM_1);
+    ESP_LOGI(COLOR_PINK"BAT:"COLOR_WHITE, "DC voltage: %0.2f", bat_voltage);
+    float ldr_voltage = continous_adc_manager.read_dc_voltage_on_channel(GPIO_NUM_0);
+    ESP_LOGI(COLOR_PINK"LDR:"COLOR_WHITE, "DC voltage: %0.2f", ldr_voltage);
+
     if(ESP_OK == i2c_num0_init_result)
     {
         tail_bmx280.read();
@@ -423,13 +431,16 @@ void Main::loop(void){
     }
 
     /*int32_t raw_scale = hive_scale.read_raw();*/
+    #ifdef SCALE_EN
     DS18B20::read_all_sensors();
     ESP_LOGI(DS18B20::log_label_ds18b20, "pcb temp:%0.2f°C Scale temp:%0.2f°C", DS18B20::get_last_measurement(ds18temp_addr_pcb), DS18B20::get_last_measurement(ds18temp_addr_scale));
+    #endif
 
+    #ifdef SCALE_EN
     ESP_LOGE("scale", "processed value: %0.2f", hive_scale.read(30));
+    #endif
 
-    mcu_info.update_mcu_telemetry();
-    mcu_info.set_bat_voltage(continous_adc_manager.read_dc_voltage_on_channel(GPIO_NUM_1));
+    
 
     time_t last_full_minute_unix = (mcu_time_unix - (time_t)now_tm.tm_sec);
     rdy_to_report |= ((ESP_OK == Homeassistant_websocket::sensor_report_period_rdy(last_full_minute_unix, last_report_send_period, 60)) ? true : false);
@@ -439,6 +450,9 @@ void Main::loop(void){
         reset_id_rtcmem += 100 * (uint16_t)(now_tm.tm_min);
         reset_id_rtcmem += 10000 * (uint16_t)(now_tm.tm_hour);
     }
+
+    TaskHandle_t myTaskHandle = xTaskGetCurrentTaskHandle();
+    ESP_LOGE("STACK SIZE", "stack %ld", (uint32_t)uxTaskGetStackHighWaterMark(myTaskHandle));
 
     if ((Ntp_time::rtc_time_sts_t::Not_synced_usable == time_reliability) || (Ntp_time::rtc_time_sts_t::OK == time_reliability))
     {
@@ -489,7 +503,7 @@ void Main::loop(void){
                         }
                     }
 
-                    if (ESP_OK == bmx_report_rdy)
+                    if (/*ESP_OK == bmx_report_rdy*/ true)
                     {
                         tail_bmx280.get_service_data_report(mqtt_service_data_buffer, 2048, "bmx0");
                         ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
@@ -546,9 +560,26 @@ void Main::loop(void){
                     snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
                     report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
 
-                    DS18B20::get_service_data_report(mqtt_service_data_buffer, 2048);
-                    ESP_LOGD("service_data", "%s", mqtt_service_data_buffer);
-                    snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
+                    // sensor_measurement_report.evaluate_send_time(mcu_time_unix);
+                    
+                    // mcu_info.add_to_report(sensor_measurement_report);
+                    // tail_bmx280.add_to_report(sensor_measurement_report, 0u);
+                    // onboard_bmx280.add_to_report(sensor_measurement_report, 1u);
+                    // hall_angle_sensor.add_to_report(sensor_measurement_report, 10);
+                    // wlan_interface.add_to_report(sensor_measurement_report);
+                    // hive_scale.add_to_report(sensor_measurement_report);
+                    // DS18B20::add_to_report(sensor_measurement_report);
+                    // mcu_info.add_to_report(sensor_measurement_report);
+                    /*sensor_measurement_report.sort_keyval_array_by_group();*/
+                    
+
+                    
+
+                    // DS18B20::get_service_data_report(mqtt_service_data_buffer, 2048);
+                    // ESP_LOGD("service_data", "%s", mqtt_service_data_buffer);
+                    // snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
+                    
+                    sensor_measurement_report.get_websoc_text(msg, 2048, ha_websoc.ha_websoc_header_template);
                     report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
 
                     wind_hall.pulse_low_us = 0;
@@ -561,60 +592,59 @@ void Main::loop(void){
                 ha_websoc.disconnect();
                 rdy_to_report = false;
 
+                wlan_interface.fastScan();
                 vTaskDelay(200/portTICK_PERIOD_MS);
                 night_man.update_awake_time();
                 night_man.schedule_rtc_wakeup(40 * 1000);
                 night_man.enter_deep_sleep();
-                /*wlan_interface.fastScan();*/
+                
                 
             }
         }
     }
-    else
-    {
-        if (true == rdy_to_report)
-        {
-            /* fallback in case NTP sync is not possible TODO: add timeout to not enter this part right away, try and get NTP sync before */
+    //@TODO: add this back in, but with new methods for generating report
+    // else
+    // {
+    //     if (true == rdy_to_report)
+    //     {
+    //         /* fallback in case NTP sync is not possible TODO: add timeout to not enter this part right away, try and get NTP sync before */
 
-            /* use the ESP internal uptime counter to send a status/ alive massage at least every 5 minutes - fallback operation */
-            esp_err_t mcu_info_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(now_sys_uptime_secs, mcu_info.last_report_sys_uptime, (60*5), false);
+    //         /* use the ESP internal uptime counter to send a status/ alive massage at least every 5 minutes - fallback operation */
+    //         esp_err_t mcu_info_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(now_sys_uptime_secs, mcu_info.last_report_sys_uptime, (60*5), false);
 
-            if (ESP_OK == mcu_info_report_rdy)
-            {
+    //         if (ESP_OK == mcu_info_report_rdy)
+    //         {
 
-                esp_err_t connect_res = ha_websoc.connectAndAuthSocket(5, 1500);
+    //             esp_err_t connect_res = ha_websoc.connectAndAuthSocket(5, 1500);
 
-                if (ESP_ERR_WIFI_BASE == connect_res)
-                {
-                    ESP_LOGE("WEBSOC", "No network, unable to connect.");
-                }
-                else
-                {
-                    esp_err_t report_sent = ESP_FAIL;
+    //             if (ESP_ERR_WIFI_BASE == connect_res)
+    //             {
+    //                 ESP_LOGE("WEBSOC", "No network, unable to connect.");
+    //             }
+    //             else
+    //             {
+    //                 esp_err_t report_sent = ESP_FAIL;
 
-                    mcu_info.get_service_data_report(mqtt_service_data_buffer, 2048);
-                    ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
-                    snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
-                    report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
+    //                 mcu_info.get_service_data_report(mqtt_service_data_buffer, 2048);
+    //                 ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
+    //                 snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
+    //                 report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
 
-                    if (ESP_OK == report_sent)
-                    {
-                        mcu_info.last_report_unix = mcu_time_unix;
-                        mcu_info.last_report_sys_uptime = now_sys_uptime_secs;
-                    }
-                }
-                ha_websoc.disconnect();
-                rdy_to_report = false;
-            }
-        }
-    }
+    //                 if (ESP_OK == report_sent)
+    //                 {
+    //                     mcu_info.last_report_unix = mcu_time_unix;
+    //                     mcu_info.last_report_sys_uptime = now_sys_uptime_secs;
+    //                 }
+    //             }
+    //             ha_websoc.disconnect();
+    //             rdy_to_report = false;
+    //         }
+    //     }
+    // }
 
     /*ccs811_read_sensor(&ccs811_mox_sensor);*/
 
-    float bat_voltage = continous_adc_manager.read_dc_voltage_on_channel(GPIO_NUM_1);
-    ESP_LOGI(COLOR_PINK"BAT:"COLOR_WHITE, "DC voltage: %0.2f", bat_voltage);
-    float ldr_voltage = continous_adc_manager.read_dc_voltage_on_channel(GPIO_NUM_0);
-    ESP_LOGI(COLOR_PINK"LDR:"COLOR_WHITE, "DC voltage: %0.2f", ldr_voltage);
+    
 
     night_man.update_awake_time();
 

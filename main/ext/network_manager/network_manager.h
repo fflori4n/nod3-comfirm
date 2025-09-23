@@ -86,6 +86,9 @@ namespace NETWORK
                 uint8_t num_of_sta_connected_to_ap;
                 uint8_t num_of_espressif_devices;
 
+                float estimated_distance_from_ap;
+                float connection_ok_hours;
+
                 uint8_t channel;
 
             } wlan_manager_stats_t;
@@ -241,12 +244,12 @@ namespace NETWORK
             static constexpr uint8_t maimum_number_of_STAs{80};
             static constexpr bool enable_switch_to_higher_prio{false}; /* this will allow the ESP to leave a good connection and switch AP if a higher prio AP is present, TODO: could be used for OTA update, with a predefined name or prio*/
             
-            static std::array<wlan_scan_devices_t, (maximum_number_of_APs + maimum_number_of_STAs)> wlan_device_list;
+            static RTC_FAST_ATTR std::array<wlan_scan_devices_t, (maximum_number_of_APs + maimum_number_of_STAs)> wlan_device_list;
             static std::array<wlan_access_point_id_t,3>  access_point_list;
             static uint64_t esp_my_mac;
             
 
-            RTC_FAST_ATTR static wlan_manager_stats_t statistics;
+            static RTC_FAST_ATTR wlan_manager_stats_t statistics;
 
             uint16_t scan_period_counter = 0;
 
@@ -258,10 +261,15 @@ namespace NETWORK
             uint32_t wifi_connected_sec;
             uint32_t wifi_trying_to_connect;
             static bool wifi_ext_task_inhibit_flag;
+            inline static char* ssid_name = "";
 
             static std::mutex wifi_driver_mutex;
             /* Maybe it makes sense to use a separate mutex for callbacks because they are async compred to main task. */
             static std::mutex wifi_driver_callback_mutex;
+
+            uint16_t num_of_active_ap_scanned = maximum_number_of_APs;
+            inline RTC_FAST_ATTR static wifi_ap_record_t ap_info[maximum_number_of_APs];
+            inline RTC_FAST_ATTR static uint16_t ap_count = 0;
             
 
         private:
@@ -336,6 +344,29 @@ namespace NETWORK
                 {
                     return ESP_FAIL;
                 }
+                return ESP_OK;
+            }
+
+            esp_err_t add_to_report(Report_builder& report_buildr){
+
+                esp_wifi_sta_get_rssi(&statistics.rssi);
+                report_buildr.add_keyval(Report_group_e::DEV_WLAN_CON, "w_rssi", (void*)&(statistics.rssi), Type_e::INT32, {-100.0f, 0.0f});
+
+                statistics.estimated_distance_from_ap = estimate_ap_dist_from_rssi(statistics.rssi);
+                report_buildr.add_keyval(Report_group_e::DEV_WLAN_CON, "w_dest", (void*)&(statistics.estimated_distance_from_ap), Type_e::FLOAT32, {0.0f, 500.0f});
+            
+                uint32_t number_of_dev_on_ch = statistics.num_of_ap_current_channel + statistics.num_of_sta_current_channel;
+                uint32_t total_number_of_dev = statistics.num_of_ap + statistics.num_of_sta;
+                uint32_t connected_dev = statistics.num_of_sta_connected_to_ap;
+
+                statistics.connection_ok_hours = statistics.connection_ok_sec* 1.0/3600.0;
+                report_buildr.add_keyval(Report_group_e::DEV_WLAN_CON, "w_con_tm", (void*)&(statistics.connection_ok_hours), Type_e::FLOAT32);
+                report_buildr.add_keyval(Report_group_e::DEV_WLAN_CON, "w_recon", (void*)&(statistics.num_of_reconnect), Type_e::INT32);
+                report_buildr.add_keyval(Report_group_e::DEV_WLAN_CON, "w_ssid", (void*)(user_cfg_basic.ssid), Type_e::PCHAR_STR);
+                report_buildr.add_keyval(Report_group_e::DEV_WLAN_CON, "w_condev", (void*)&(connected_dev), Type_e::INT32);
+                report_buildr.add_keyval(Report_group_e::DEV_WLAN_CON, "w_alldev", (void*)&(total_number_of_dev), Type_e::INT32);
+                report_buildr.add_keyval(Report_group_e::DEV_WLAN_CON, "w_chdev", (void*)&(number_of_dev_on_ch), Type_e::INT32);
+                
                 return ESP_OK;
             }
 
@@ -443,38 +474,6 @@ namespace NETWORK
 
                 return "UNDEFINED";
             }
-
-            // static const char* wlan_auth_mode(wifi_auth_mode_t key)
-            // {
-            //     // constexpr std::array<std::pair<wifi_auth_mode_t, const char *>, 16> event_to_str_map = {{
-            //     //     /*{WIFI_AUTH_OPEN, "OPEN"},
-            //     //     {WIFI_AUTH_WEP, "WEP"},
-            //     //     {WIFI_AUTH_WPA_PSK, "WPA_PSK"},
-            //     //     {WIFI_AUTH_WPA2_PSK, "WPA2_PSK"},
-            //     //     {WIFI_AUTH_WPA_WPA2_PSK, "WPA_WPA2_PSK"},
-            //     //     {WIFI_AUTH_ENTERPRISE, "ENTERPRISE"},
-            //     //     {WIFI_AUTH_WPA2_ENTERPRISE, "ENTERPRISE"},
-            //     //     {WIFI_AUTH_WPA3_PSK, "WPA3_PSK"},
-            //     //     {WIFI_AUTH_WPA2_WPA3_PSK, "WPA2_WPA3_PSK"},
-            //     //     {WIFI_AUTH_WAPI_PSK, "WAPI_PSK"},
-            //     //     {WIFI_AUTH_OWE, "OWE"},
-            //     //     {WIFI_AUTH_WPA3_ENT_192, "WPA3_ENT_192"},
-            //     //     {WIFI_AUTH_WPA3_EXT_PSK, "WPA3_EXT_PSK"},
-            //     //     {WIFI_AUTH_WPA3_EXT_PSK_MIXED_MODE, "WPA3_EXT_PSK_MIXED_MODE"},
-            //     //     {WIFI_AUTH_DPP, "DPP"},
-            //     //     {WIFI_AUTH_MAX, "MAX"}*/
-            //     // }};
-
-            //     // for (auto &pair : event_to_str_map)
-            //     // {
-            //     //     if (pair.first == key)
-            //     //     {
-            //     //         return pair.second;
-            //     //     }
-            //     // }
-
-            //     return "UNDEFINED";
-            // }
 
             static const char* known_device_by_mac(uint64_t mac)
             {

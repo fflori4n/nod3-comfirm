@@ -97,7 +97,7 @@ public:
     static constexpr uint16_t i2c_com_pause_read{100};
     static constexpr uint16_t i2c_com_pause_write{500};
 
-    static constexpr uint8_t selected_measurement_mode{(uint8_t)CCS811_constant::MEASUREMENT_MODE_60SEC};
+    static constexpr uint8_t selected_measurement_mode{(uint8_t)CCS811_constant::MEASUREMENT_MODE_10SEC};
 
 private:
 
@@ -385,6 +385,7 @@ public:
         res = this->read_reg((uint8_t)CCS811_register::STATUS, 1u);
         status_reg = (status_reg_t)ccs811_comm_buffer[0];
 
+        ESP_LOGI(log_label_ccs811,"App valid: %s, error reg: %s", ((1u == status_reg.app_valid) ? "OK" : "ER"), ((0u == status_reg.error) ? "OK" : "ER"));
         if((1u == status_reg.app_valid) && (0u == status_reg.error))
         {
 
@@ -406,19 +407,24 @@ public:
                 res = this->read_reg((uint8_t)0x11, 2u);
                 this->raw_baseline = ((ccs811_comm_buffer[1] << 8) | ccs811_comm_buffer[0]);
                 //this->set_baseline_ambient(ext_temperatur, ext_rh, 0xFFFF);
+                this->debug_print();
+            }
+            else
+            {
+                ESP_LOGW(log_label_ccs811, "data not ready");
             }
 
             res = this->read_reg((uint8_t)CCS811_register::MEASUREMENT_MODE, 1u);
-            if (selected_measurement_mode != ccs811_comm_buffer[0])
+            if (selected_measurement_mode != (ccs811_comm_buffer[0] & (0b111 << 4u)))
             {
                 ESP_LOGW(log_label_ccs811, "Measurement mode is incorectly set: %d, now setting to %d", ccs811_comm_buffer[0], selected_measurement_mode);
-                ccs811_comm_buffer[0] = selected_measurement_mode;
+                ccs811_comm_buffer[0] |= selected_measurement_mode;
                 res = this->write_reg((uint8_t)CCS811_register::MEASUREMENT_MODE, 1u);
             }
         }
         else
         {
-            /* module is not working correcly, reinitialize */
+            /* module is not working correctly, reinitialize */
             ESP_LOGI(log_label_ccs811,"CCS811 is incorrecly configured, will do reinit");
             ESP_LOGI(log_label_ccs811, "Status reg: | %s | x | x | firmware load: %s | measurement rdy: %s | x | x | %s |", ((0u == status_reg.fw_mode) ? "BOOT" : "APP"), (0u == status_reg.app_valid) ? "ER" : "OK", (0u == status_reg.data_rdy) ? "NO" : "RDY", (0u == status_reg.error) ? "OK" : "ER");
             this->init();

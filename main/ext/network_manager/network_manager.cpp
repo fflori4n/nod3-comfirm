@@ -18,7 +18,7 @@ namespace NETWORK
     bool Wlan::wifi_ext_task_inhibit_flag = true;
     uint8_t Wlan::associated_ap_index = 0;
     std::array<Wlan::wlan_access_point_id_t,3>  Wlan::access_point_list = {{
-        { .ssid = "", .passwd = "", .device_mac = 0x00, .channel = 0x00, .low_rssi_tresh = -99, .priority = 0 },
+        { .ssid = "", .passwd = "", .device_mac = 0x00, .channel = 6, .low_rssi_tresh = -99, .priority = 0 },
         { .ssid = "adsl sandor", .passwd = "floriflori", .device_mac = 0x00, .channel = 0x00, .low_rssi_tresh = -99, .priority = 0 },
         { .ssid = "GGGGG", .passwd = "123456789", .device_mac = 0x00, .channel = 0x00, .low_rssi_tresh = -99, .priority = 0 }
     }};
@@ -48,37 +48,31 @@ esp_err_t Wlan::init(void){
         /*esp_event_loop_create_default()*/
 
         /* register wifi event handler functions */
-        ESP_LOGI(NETWORK::Wlan::log_label, "registering wifi handlers");
+        /*ESP_LOGI(NETWORK::Wlan::log_label, "registering wifi handlers");*/
         if (ESP_OK == retStatus)
         {
             retStatus = esp_event_handler_instance_register(WIFI_EVENT,ESP_EVENT_ANY_ID,&_wifiEventHandler,nullptr,nullptr);
-        }
-        if (ESP_OK == retStatus)
-        {
             retStatus = esp_event_handler_instance_register(IP_EVENT,ESP_EVENT_ANY_ID,&_wifiEventHandler,nullptr,nullptr);
         }
 
-        if(ESP_OK == retStatus){
+        if(ESP_OK == retStatus)
+        {
             p_netif = esp_netif_create_default_wifi_sta();
-
-            if(NULL == p_netif){
-                retStatus = ESP_FAIL;
-            }
+            retStatus = (nullptr == p_netif) ? (ESP_FAIL) : (ESP_OK);
         }
 
-        if(ESP_OK == retStatus){
-            _wifiInitCfg = WIFI_INIT_CONFIG_DEFAULT(); /*@TODO: set at compile to be default.*/
+        if(ESP_OK == retStatus)
+        {
             retStatus = esp_wifi_init(&_wifiInitCfg);
-           
         }
         /* set WIFI power saving mode - more saving slower response */
-        if(ESP_OK == retStatus){
-
-            const wifi_ps_type_t power_mode{static_cast<wifi_ps_type_t>(wifi_power_save_mode)};
-            retStatus = esp_wifi_set_ps(power_mode);
+        if(ESP_OK == retStatus)
+        {
+            retStatus = esp_wifi_set_ps(static_cast<wifi_ps_type_t>(wifi_power_save_mode));
         }
 
-        if(ESP_OK == retStatus){
+        if(ESP_OK == retStatus)
+        {
 
             /* replace the ssid and password, if there is a known AP loaded from Nvs */
 
@@ -111,29 +105,6 @@ esp_err_t Wlan::init(void){
     return retStatus;
 }
 
-esp_err_t Wlan::set_wifi_connection_target(int8_t ap_index){
-
-    esp_err_t retStatus = ESP_FAIL;
-    
-
-
-    // if(ap_index == -1){     /* disconnect wifi and do not connect to any AP*/
-        
-    //   //  Wlan::_wifiConfig.sta.ssid = {'\0'};
-    //   //  Wlan::_wifiConfig.sta.password = {'\0'};
-
-    //     strncpy(Wlan::_wifiConfig.sta.ssid, (char*)"", 32);
-    //     strncpy(Wlan::_wifiConfig.sta.password, (char*)"", 64);
-        
-    // }
-
-    // esp_wifi_disconnect();
-    // esp_wifi_set_config(WIFI_IF_STA, &_wifiConfig);
-    // esp_wifi_connect();
-
-    return retStatus;
-}
-
 esp_err_t Wlan::sta_connect(void){
 
     esp_err_t retStatus = ESP_OK;
@@ -144,11 +115,13 @@ esp_err_t Wlan::sta_connect(void){
 
     if(ESP_OK == retStatus){
         
+        esp_wifi_set_mode(WIFI_MODE_NAN);
+        vTaskDelay(2000 / portTICK_PERIOD_MS);
         _wlanIfaceState = wlan_state_t::standby;
         esp_wifi_set_mode(WIFI_MODE_STA);
         esp_wifi_start();
+        retStatus = esp_wifi_set_max_tx_power(8.5 * 4);  // 20 dBm
 
-        retStatus = esp_wifi_set_max_tx_power(20 * 4);  // 20 dBm
         if (retStatus != ESP_OK) {
             printf("Failed to set TX power: %s\n", esp_err_to_name(retStatus));
         }
@@ -318,8 +291,6 @@ void Wlan::_wifiEventHandler(void *event_handler_arg, esp_event_base_t event_bas
                     _wlanIfaceState = wlan_state_t::sta_wait_for_connection;
                     break;
                 }
-
-
 
                 case WIFI_EVENT_STA_CONNECTED:
                 {
@@ -707,9 +678,7 @@ void Wlan::calculate_nearby_dev_statistics(wlan_manager_stats_t &statistics, wla
 esp_err_t Wlan::fastScan(void)
 {
     esp_err_t retStatus = ESP_OK;
-    uint16_t num_of_active_ap_scanned = maximum_number_of_APs;
-    wifi_ap_record_t ap_info[maximum_number_of_APs];
-    uint16_t ap_count = 0;
+    
 
     vTaskDelay(100 / portTICK_PERIOD_MS);       /* wait a little bit, to let other tasks pause*/
 
@@ -747,9 +716,9 @@ esp_err_t Wlan::fastScan(void)
     {
         
 
-        constexpr const uint16_t scan_time_per_channel_ms{500}; /* 500 */
+        constexpr const uint16_t scan_time_per_channel_ms{100}; /* 500 */
         constexpr const uint16_t scan_time_home_dwell_ms{250};  /* 250 */
-        constexpr const uint16_t scan_time_extra_margin_ms{2000};   /* 2000 */
+        constexpr const uint16_t scan_time_extra_margin_ms{250};   /* 2000 */
 
         constexpr const wifi_scan_config_t scan_config = { 
             .show_hidden = true, 
@@ -819,15 +788,24 @@ esp_err_t Wlan::fastScan(void)
                 new_ap_device.ssid = (char*)ap_record.ssid;
                 new_ap_device.scan_cycle_since_detect = 0U;
 
-                for(auto& access_point : Wlan::access_point_list){
+                // for(auto& access_point : Wlan::access_point_list){
 
-                    if(0 == strncmp((char*)ap_record.ssid, access_point.ssid, 30)){
-                        access_point.device_mac = new_ap_device.device_mac;
-                        access_point.channel = new_ap_device.channel;
-                        access_point.last_seen = 0;
+                //     if(0 == strncmp((char*)ap_record.ssid, access_point.ssid, 30)){
+                //         access_point.device_mac = new_ap_device.device_mac;
+                //         access_point.channel = new_ap_device.channel;
+                //         access_point.last_seen = 0;
 
-                        ESP_LOGI("","AP is currently present: %s, mac: %llx, CH:%d", ap_record.ssid, access_point.device_mac, access_point.channel);
-                    }
+                //         ESP_LOGI("","AP is currently present: %s, mac: %llx, CH:%d", ap_record.ssid, access_point.device_mac, access_point.channel);
+                //     }
+                // }
+                if( 0 == strncmp(new_ap_device.ssid.c_str(),(const char*)_wifiConfig.sta.ssid, 30)){
+
+                    wlan_access_point_id_t& access_point = NETWORK::Wlan::access_point_list[0u];
+                    access_point.device_mac = new_ap_device.device_mac;
+                    access_point.channel = new_ap_device.channel;
+                    access_point.last_seen = 0;
+
+                    ESP_LOGI("","AP is currently present: %s, mac: %llx, CH:%d", ap_record.ssid, access_point.device_mac, access_point.channel);
                 }
 
                 /*new_ap_device.print_ap();*/
@@ -884,6 +862,7 @@ void task_wlan_manager(void *parameters){
         /* l--> (WIFI_EVENT_STA_START) -> [sta_wait_for_connection]                 l--> soft_reset         */
         /* l--> (WIFI_EVENT_STA_CONNECTED) -> [sta_wait_for_ip]                                             */
         /* l--> (IP_EVENT_STA_GOT_IP) -> [connection_ok]                                                    */
+
 
         for(;;){
 

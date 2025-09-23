@@ -382,6 +382,61 @@ public:
         return ESP_OK;
 
     }
+
+    esp_err_t add_to_report(Report_builder &report_buildr, uint8_t lrpm)
+    {
+
+        report_buildr.add_keyval(Report_builder::tag_value_t{
+            .type = Type_e::INT32,
+            .key = "wvane_sts",
+            .value = (void*)&(mag_status),
+            .group = Report_group_e::SENSOR_BMX
+        },{0, 0xFF});
+
+        report_buildr.add_keyval(Report_builder::tag_value_t{
+            .type = Type_e::INT32,
+            .key = "wvane_gain",
+            .value = (void*)&(gain_ctrl),
+            .group = Report_group_e::SENSOR_BMX
+        },{0, 0xFF});
+
+        report_buildr.add_keyval(Report_builder::tag_value_t{
+            .type = Type_e::INT32,
+            .key = "wvane_mag",
+            .value = (void*)&(hall_magnitude),
+            .group = Report_group_e::SENSOR_BMX
+        },{0, 0xFFFF});
+
+        report_buildr.add_keyval(Report_builder::tag_value_t{
+            .type = Type_e::INT32,
+            .key = "wvane_raw",
+            .value = (void*)&(raw_reading),
+            .group = Report_group_e::SENSOR_BMX
+        },{0, 4096u});
+
+        report_buildr.add_keyval(Report_builder::tag_value_t{
+            .type = Type_e::FLOAT32,
+            .key = "wvane_degc",
+            .value = (void*)&(degrees),
+            .group = Report_group_e::SENSOR_BMX
+        },{0, 4096u});
+
+        report_buildr.add_keyval(Report_builder::tag_value_t{
+            .type = Type_e::FLOAT32,
+            .key = "wanemo_lrpm",
+            .value = (void*)&(lrpm),
+            .group = Report_group_e::SENSOR_BMX
+        },{0.0f, 10000.0f});
+
+        report_buildr.add_keyval(Report_builder::tag_value_t{
+            .type = Type_e::FLOAT32,
+            .key = "wanemo_edge",
+            .value = (void*)&(pulse_count),
+            .group = Report_group_e::SENSOR_BMX
+        },{0.0f, 0xFFFFFFFF});
+        
+        return ESP_OK;
+    }
 };
 
 #endif /* LIB_AS5600_H */

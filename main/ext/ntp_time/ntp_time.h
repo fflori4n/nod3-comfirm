@@ -12,7 +12,7 @@ public:
     /* set ANNO DOMINI/ mission start datetime - this will be the datetime of sensor deployement, any date older than this does not make sense. It will also serve as mission start date to calculate
     number of days since sensor deployement or 'SOL's */
     /* NOTE: SOL is confusing because it is mostly used in Mars context, but in this case it will be the same as day only that the sol transition happens at 9h in the morning */
-    static inline constexpr uint16_t anno_domini_datetime[] = {2025, 6, 10, 9, 0, 0, 0};
+    static inline constexpr uint16_t anno_domini_datetime[] = {2025, 8, 10, 9, 0, 0, 0};
 
     static constexpr const char* time_zone_tz_code{"CET-1CEST-2,M3.5.0/02:00:00,M10.5.0/03:00:00"};
     static constexpr const char* sntp_primary_server_url{"pool.ntp.org"};
