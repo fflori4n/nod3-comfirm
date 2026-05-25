@@ -2,7 +2,7 @@
     "configurations": [
         {
             "name": "ESP-IDF",
-            "compilerPath": "${config:idf.toolsPath}/tools/riscv32-esp-elf/esp-13.2.0_20240530/riscv32-esp-elf/bin/riscv32-esp-elf-gcc",
+            "compilerPath": "/home/fflori4n/.espressif/tools/riscv32-esp-elf/esp-15.2.0_20251204/riscv32-esp-elf/bin/riscv32-esp-elf-gcc",
             "defines": [],
             "cStandard": "c17",
             "cppStandard": "gnu++17",
@@ -17,7 +17,8 @@
                 "/home/ffsk/esp/esp-idf/components/newlib/platform_include",
                 "/home/ffsk/esp/esp-idf/components",
                 "/home/ffsk/esp/esp-idf/components/soc/esp32p4/register",
-                "/home/ffsk/esp/esp-idf/components/esp_driver_i2c/include"
+                "/home/ffsk/esp/esp-idf/components/esp_driver_i2c/include",
+                "/home/ffsk/esp/esp-idf/components/esp_driver_gpio"
             ],
             "browse": {
                 "path": [
