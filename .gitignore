@@ -35,3 +35,5 @@
 .vscode/*
 bin/*
 build/*
+
+network_credentials.h

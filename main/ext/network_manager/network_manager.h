@@ -45,8 +45,14 @@ namespace NETWORK
                 sta_connection_stable,
                 ap_active,
                 power_down,
-                error
+                error,
+                /* END */
+                numof_wlan_states
             };
+
+            
+
+            
 
             enum class wifi_power_save_e{
 
@@ -94,6 +100,7 @@ namespace NETWORK
             } wlan_manager_stats_t;
 
             static constexpr uint16_t wlan_scan_period_sec{60};
+            static constexpr uint8_t numof_wlan_access_point_names{3};
 
             static constexpr char* network_sensor_template = "\"w_rssi\":%.2f,\"w_dest\":%.2f,\"w_con_tm\":%.2f,\"w_recon\":%d,\"w_condev\":%d,\"w_alldev\":%d,\"w_chdev\":%d,\"w_apssid\":\"%s\"";
             static constexpr time_t report_cycle_time_sec{2 * 60};
@@ -126,6 +133,45 @@ namespace NETWORK
                     ESP_LOGI(log_label,"wlan_access_point_id_t:: %s, pass: %s, %12llx, CH%d, RSSI dropout: %d, prio: %d, last seen: %d", ssid, passwd, device_mac, channel, low_rssi_tresh, priority, last_seen);
                 }
             }wlan_access_point_id_t;
+
+            class Wlan_access_point{
+
+                public:
+
+                char ssid[20];
+                char passwd[20];
+                uint64_t device_mac;
+                uint8_t channel;
+                int8_t low_rssi_tresh;
+                uint8_t priority;
+                uint8_t last_seen;
+
+                /*float connect_score;*/
+                Wlan_access_point() = default;
+                Wlan_access_point(char* ssid, char* passwd, const uint64_t device_mac, const uint8_t channel, const int8_t low_rssi, const uint8_t priority, uint8_t last_seen) : device_mac(device_mac),channel(channel),low_rssi_tresh(low_rssi),priority(priority),last_seen(last_seen)
+                {
+                    /* @TODO: some kind of warning when str truncated? */
+                    strncpy(this->ssid, ssid, sizeof(this->ssid)/sizeof(char));
+                    strncpy(this->passwd, passwd, sizeof(this->passwd)/sizeof(char));
+                }
+
+                Wlan_access_point(const Wlan_access_point& other){
+                    this->device_mac = other.device_mac;
+                    this->channel = other.channel;
+                    this->low_rssi_tresh = other.low_rssi_tresh;
+                    this->priority = other.priority;
+                    this->last_seen = other.last_seen;
+
+                    strncpy(this->ssid, other.ssid, sizeof(this->ssid)/sizeof(char));
+                    strncpy(this->passwd, other.passwd, sizeof(this->passwd)/sizeof(char));
+                }
+
+                void print(void){
+                    ESP_LOGI(log_label,"WLAN_AP: %s, pass: %s, %12llx, CH%d, RSSI dropout: %d, prio: %d, last seen: %d", ssid, passwd, device_mac, channel, low_rssi_tresh, priority, last_seen);
+                }
+
+                char* get_ssid() const { return const_cast<char*>(ssid); }
+            };
 
             typedef struct wlan_scan_devices_t{
 
@@ -245,7 +291,7 @@ namespace NETWORK
             static constexpr bool enable_switch_to_higher_prio{false}; /* this will allow the ESP to leave a good connection and switch AP if a higher prio AP is present, TODO: could be used for OTA update, with a predefined name or prio*/
             
             static RTC_FAST_ATTR std::array<wlan_scan_devices_t, (maximum_number_of_APs + maimum_number_of_STAs)> wlan_device_list;
-            static std::array<wlan_access_point_id_t,3>  access_point_list;
+            static std::array<Wlan_access_point, numof_wlan_access_point_names>  access_point_list;
             static uint64_t esp_my_mac;
             
 
@@ -314,7 +360,7 @@ namespace NETWORK
             static uint16_t count_ap_on_channel(uint8_t channel);
             static uint16_t count_all_ap(void);
             static float estimate_ap_dist_from_rssi(int8_t rssi);
-            static void calculate_nearby_dev_statistics(wlan_manager_stats_t &statistics, wlan_access_point_id_t &associated_ap);
+            static void calculate_nearby_dev_statistics(wlan_manager_stats_t &statistics, Wlan::Wlan_access_point &associated_ap);
             esp_err_t set_wifi_connection_target(int8_t ap_index);
             
 
@@ -371,6 +417,24 @@ namespace NETWORK
             }
 
             wlan_state_t get_wlan_state(void) { return _wlanIfaceState; };
+
+            static constexpr char wlan_state_text_lut[static_cast<uint8_t>(wlan_state_t::numof_wlan_states)][30] = {
+                "net_not_inited",
+                "net_inactive  ",
+                "driver_standby",
+                "sta_connecting",
+                "sta_wait_ip   ",
+                "sta_connected ",
+                "sta_con_stable",
+                "ap_active     ",
+                "net_power_down",
+                "net_error     "
+                };
+            
+            const char* get_wlan_state_str(void) { 
+                                /* TODO: blah check for null or out of bounds. */
+                return wlan_state_text_lut[static_cast<uint8_t>(_wlanIfaceState)];
+            };
 
             void set_wlan_state(wlan_state_t new_state){ _wlanIfaceState = new_state;}
 

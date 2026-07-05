@@ -1,4 +1,5 @@
 #include "network_manager.h"
+#include "network_credentials.h"
 
 class ADC_continous;    /* forward declared because need to pause ADC when wifi is sta_begin ing*/
 /* static member init */
@@ -17,11 +18,8 @@ namespace NETWORK
     
     bool Wlan::wifi_ext_task_inhibit_flag = true;
     uint8_t Wlan::associated_ap_index = 0;
-    std::array<Wlan::wlan_access_point_id_t,3>  Wlan::access_point_list = {{
-        { .ssid = "", .passwd = "", .device_mac = 0x00, .channel = 6, .low_rssi_tresh = -99, .priority = 0 },
-        { .ssid = "adsl sandor", .passwd = "floriflori", .device_mac = 0x00, .channel = 0x00, .low_rssi_tresh = -99, .priority = 0 },
-        { .ssid = "GGGGG", .passwd = "123456789", .device_mac = 0x00, .channel = 0x00, .low_rssi_tresh = -99, .priority = 0 }
-    }};
+
+    std::array<Wlan::Wlan_access_point, NETWORK::Wlan::numof_wlan_access_point_names>  Wlan::access_point_list = get_wlan_credentials();
 
     wifi_init_config_t Wlan::_wifiInitCfg = WIFI_INIT_CONFIG_DEFAULT();
     wifi_config_t Wlan::_wifiConfig{};
@@ -145,27 +143,53 @@ esp_err_t Wlan::start_ap(){
 
     res = esp_event_handler_instance_register(WIFI_EVENT,ESP_EVENT_ANY_ID,&_wifiEventHandler,nullptr,nullptr);
 
+    Wlan_access_point espap_provisioning_wlan = get_esp_ap_provisioning_credentials();
+
+    
     wifi_config_t wifi_config = {
         .ap = {
-            .ssid = "jklello",
+            .ssid = "espC3_magpie",
             .password = "123456789",
-            .ssid_len = strlen("jklello"),
-            .channel = 6,
+            .ssid_len = strlen("espC3_magpie"),
+            .channel = 3,
             .authmode = WIFI_AUTH_WPA2_PSK,
-            .max_connection = 1,
+            .max_connection = 10,
             .pmf_cfg = {
-                    .required = true,
+                .required = true,
             },
         },
     };
+
+    /* but actually change the AP credentials to the ones in network_credentials.h */
+    snprintf((char*)wifi_config.ap.ssid, 20, "%s", espap_provisioning_wlan.ssid);
+    snprintf((char*)wifi_config.ap.password, 20, "%s", espap_provisioning_wlan.passwd);
+    wifi_config.ap.ssid_len = strlen((char*)wifi_config.ap.ssid);
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
+    esp_netif_ip_info_t ip_info;
+    esp_netif_t *ap_netif = esp_netif_get_handle_from_ifkey("WIFI_AP_DEF");
+
+    // esp_netif_ip_info_t ip;
+    // IP4_ADDR(&ip.ip, 192,168,1,1);
+    // IP4_ADDR(&ip.gw, 192,168,1,1);
+    // IP4_ADDR(&ip.netmask, 255,255,255,0);
+
+    // esp_netif_dhcps_stop(ap_netif);
+    // esp_netif_set_ip_info(ap_netif, &ip);
+    // esp_netif_dhcps_start(ap_netif);
+
+    if (ap_netif &&
+        esp_netif_get_ip_info(ap_netif, &ip_info) == ESP_OK)
+    {
+        ESP_LOGI("wifi_AP","AP IP: " IPSTR, IP2STR(&ip_info.ip));
+    }
+
     _wlanIfaceState = wlan_state_t::ap_active;
 
-    ESP_LOGI("wifi_AP", "wifi_init_softap finished. SSID:%s password:%s channel:%d","jklello", "123456789", 6);
+    ESP_LOGI("wifi_AP", "wifi_init_softap finished. SSID:%s password:%s channel:%d", wifi_config.ap.ssid, wifi_config.ap.password, wifi_config.ap.channel);
 
     return res;
 }
@@ -627,7 +651,7 @@ void Wlan::wlan_promiscuous_handler(void *buff, wifi_promiscuous_pkt_type_t type
     collect_wifi_device(pckt_source_device);
 }
 
-void Wlan::calculate_nearby_dev_statistics(wlan_manager_stats_t &statistics, wlan_access_point_id_t &associated_ap){
+void Wlan::calculate_nearby_dev_statistics(wlan_manager_stats_t &statistics, Wlan::Wlan_access_point &associated_ap){
     
     statistics.num_of_ap = 0;
     statistics.num_of_sta = 0;
@@ -800,7 +824,7 @@ esp_err_t Wlan::fastScan(void)
                 // }
                 if( 0 == strncmp(new_ap_device.ssid.c_str(),(const char*)_wifiConfig.sta.ssid, 30)){
 
-                    wlan_access_point_id_t& access_point = NETWORK::Wlan::access_point_list[0u];
+                    Wlan_access_point& access_point = NETWORK::Wlan::access_point_list[0u];
                     access_point.device_mac = new_ap_device.device_mac;
                     access_point.channel = new_ap_device.channel;
                     access_point.last_seen = 0;
@@ -866,7 +890,7 @@ void task_wlan_manager(void *parameters){
 
         for(;;){
 
-            ESP_LOGI(NETWORK::Wlan::network_tag, "Wifi iface status: %d", wlan_interface.get_wlan_state());
+            ESP_LOGI(NETWORK::Wlan::network_tag, "Wifi iface status: %s", wlan_interface.get_wlan_state_str());
             
 
             switch(((Wlan::wlan_state_t)wlan_interface.get_wlan_state()))
