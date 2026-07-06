@@ -115,6 +115,7 @@ enum class Type_e : const uint8_t
 #include "as5600/as5600.h"
 #include "hx711/hx711.h"
 #include "ds18b20/ds18b20.h"
+#include "tmstamp_measurement/tmstamp_measurement.h"
 
 
 

@@ -48,6 +48,9 @@ AC_current_measurement c0_current_sensor;
 
 Report_builder sensor_measurement_report;
 
+/* Log boot measurements to timedMeasurement */
+Timestamped_measurement_storage measurement_storage;
+
 typedef struct mcu_long_term_stat_t{
 
         uint32_t num_of_program_flash = 0;
@@ -360,8 +363,6 @@ esp_err_t Main::init(void){
         /*ccs811_sensor.init();*/
         ccs811_sensor.read_measurement(0, 0);
 
-        
-        
         gpio_reset_pin(GPIO_NUM_7);
         gpio_set_direction(GPIO_NUM_7, GPIO_MODE_OUTPUT);
         gpio_set_level(GPIO_NUM_7, true);
@@ -383,15 +384,14 @@ esp_err_t Main::init(void){
         hall_angle_sensor.init();
     }
 
-    hive_scale.init(GPIO_NUM_4, GPIO_NUM_2);
-    /*hive_scale.tare(50);*/
-    hive_scale.set_scale(1208.56, 1009.0, 243531.25);
+    measurement_storage.insert_measurement(Timestamped_measurement(Measurement_type::MCU_SOL, (uint32_t)Ntp_time::get_sol()));
+    measurement_storage.insert_measurement(Timestamped_measurement(Measurement_type::MCU_TEMP, mcu_info.chip_internal_temp_degc));
 
-    // while(true){
-    //     /*int32_t raw_scale = hive_scale.read_raw();*/
-    //     ESP_LOGE("scale", "hx711 weight: %0.2f",hive_scale.read(30));
-        
-    // }
+    
+
+    // hive_scale.init(GPIO_NUM_4, GPIO_NUM_2);
+    // /*hive_scale.tare(50);*/
+    // hive_scale.set_scale(1208.56, 1009.0, 243531.25);
 
     DS18B20::discover_ds18_on_one_wire();
     DS18B20::read_all_sensors();
@@ -408,7 +408,13 @@ void Main::loop(void){
     auto [mcu_time_unix, time_reliability, now_tm] = Ntp_time::evaluate_mcu_rtc(true);
     time_t now_sys_uptime_secs = (esp_timer_get_time()/1000);
 
+    measurement_storage.print_measurements();
+
     mcu_info.update_mcu_telemetry();
+    measurement_storage.insert_measurement(Timestamped_measurement(Measurement_type::MCU_TEMP, mcu_info.chip_internal_temp_degc));
+    measurement_storage.mark_measurements_to_be_sent(0, 10, 10);
+    //measurement_storage.get_servicedata_from_marked_measurements();
+
     mcu_info.set_bat_voltage(continous_adc_manager.read_dc_voltage_on_channel(GPIO_NUM_1));
     float bat_voltage = continous_adc_manager.read_dc_voltage_on_channel(GPIO_NUM_1);
     ESP_LOGI(COLOR_PINK"BAT:"COLOR_WHITE, "DC voltage: %0.2f", bat_voltage);
@@ -454,153 +460,155 @@ void Main::loop(void){
     TaskHandle_t myTaskHandle = xTaskGetCurrentTaskHandle();
     ESP_LOGE("STACK SIZE", "stack %ld", (uint32_t)uxTaskGetStackHighWaterMark(myTaskHandle));
 
+
+
     if ((Ntp_time::rtc_time_sts_t::Not_synced_usable == time_reliability) || (Ntp_time::rtc_time_sts_t::OK == time_reliability))
     {
         Ntp_time::get_sol();
         /* if time is not ok, postpone send until there is valid time to use */
-        if (true == rdy_to_report)
-        {
-            esp_err_t mcu_info_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(mcu_time_unix, mcu_info.last_report_unix, MCUInfo::report_cycle_time_sec, false);
-            esp_err_t network_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(mcu_time_unix, wlan_interface.last_report_unix, NETWORK::Wlan::report_cycle_time_sec, false);
-            esp_err_t bmx_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(mcu_time_unix, tail_bmx280.last_report_unix, bmx280_sensor::report_cycle_time_sec, false);
-            esp_err_t ac_input_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(mcu_time_unix, continous_adc_manager.last_report_unix, ADC_continous::report_cycle_time_sec, false);
+        // if (true == rdy_to_report)
+        // {
+        //     esp_err_t mcu_info_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(mcu_time_unix, mcu_info.last_report_unix, MCUInfo::report_cycle_time_sec, false);
+        //     esp_err_t network_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(mcu_time_unix, wlan_interface.last_report_unix, NETWORK::Wlan::report_cycle_time_sec, false);
+        //     esp_err_t bmx_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(mcu_time_unix, tail_bmx280.last_report_unix, bmx280_sensor::report_cycle_time_sec, false);
+        //     esp_err_t ac_input_report_rdy = Homeassistant_websocket::sensor_report_period_rdy(mcu_time_unix, continous_adc_manager.last_report_unix, ADC_continous::report_cycle_time_sec, false);
 
-            if ((ESP_OK == mcu_info_report_rdy) || (ESP_OK == network_report_rdy) || (ESP_OK == bmx_report_rdy) || (ESP_OK == ac_input_report_rdy))
-            {
+        //     if ((ESP_OK == mcu_info_report_rdy) || (ESP_OK == network_report_rdy) || (ESP_OK == bmx_report_rdy) || (ESP_OK == ac_input_report_rdy))
+        //     {
 
-                esp_err_t connect_res = ha_websoc.connectAndAuthSocket(5, 1500);
+        //         esp_err_t connect_res = ha_websoc.connectAndAuthSocket(5, 1500);
 
-                if (ESP_ERR_WIFI_BASE == connect_res)
-                {
-                    ESP_LOGE("WEBSOC", "No network, unable to connect.");
-                }
-                else
-                {
-                    esp_err_t report_sent = ESP_FAIL;
+        //         if (ESP_ERR_WIFI_BASE == connect_res)
+        //         {
+        //             ESP_LOGE("WEBSOC", "No network, unable to connect.");
+        //         }
+        //         else
+        //         {
+        //             esp_err_t report_sent = ESP_FAIL;
 
-                    if (ESP_OK == mcu_info_report_rdy)
-                    {
-                        mcu_info.get_service_data_report(mqtt_service_data_buffer, 2048);
-                        ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
-                        snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
-                        report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
+        //             if (ESP_OK == mcu_info_report_rdy)
+        //             {
+        //               mcu_info.get_service_data_report(mqtt_service_data_buffer, 2048);
+        //                 ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
+        //                 snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
+        //                 report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
                         
-                        if(ESP_OK == report_sent){
-                            mcu_info.last_report_unix = mcu_time_unix;
-                            mcu_info.last_report_sys_uptime = esp_timer_get_time();
-                        }
-                    }
+        //                 if(ESP_OK == report_sent){
+        //                     mcu_info.last_report_unix = mcu_time_unix;
+        //                     mcu_info.last_report_sys_uptime = esp_timer_get_time();
+        //                 }
+        //             }
 
-                    if (ESP_OK == network_report_rdy)
-                    {
-                        wlan_interface.get_service_data(mqtt_service_data_buffer, 2048);
-                        ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
-                        snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
-                        report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
+        //             if (ESP_OK == network_report_rdy)
+        //             {
+        //                 wlan_interface.get_service_data(mqtt_service_data_buffer, 2048);
+        //                 ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
+        //                 snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
+        //                 report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
 
-                        if(ESP_OK == report_sent){
-                            wlan_interface.last_report_unix = mcu_time_unix;
-                        }
-                    }
+        //                 if(ESP_OK == report_sent){
+        //                     wlan_interface.last_report_unix = mcu_time_unix;
+        //                 }
+        //             }
 
-                    if (/*ESP_OK == bmx_report_rdy*/ true)
-                    {
-                        tail_bmx280.get_service_data_report(mqtt_service_data_buffer, 2048, "bmx0");
-                        ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
-                        snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
-                        report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
+        //             if (/*ESP_OK == bmx_report_rdy*/ true)
+        //             {
+        //                 tail_bmx280.get_service_data_report(mqtt_service_data_buffer, 2048, "bmx0");
+        //                 ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
+        //                 snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
+        //                 report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
 
-                        if(ESP_OK == report_sent)
-                        {
-                            tail_bmx280.last_report_unix = mcu_time_unix;
-                        }
+        //                 if(ESP_OK == report_sent)
+        //                 {
+        //                     tail_bmx280.last_report_unix = mcu_time_unix;
+        //                 }
 
-                        onboard_bmx280.get_service_data_report(mqtt_service_data_buffer, 2048, "bmx1");
-                        ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
-                        snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
-                        report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
+        //                 onboard_bmx280.get_service_data_report(mqtt_service_data_buffer, 2048, "bmx1");
+        //                 ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
+        //                 snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
+        //                 report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
 
-                        if(ESP_OK == report_sent)
-                        {
-                            onboard_bmx280.last_report_unix = mcu_time_unix;
-                        }
-                    }
+        //                 if(ESP_OK == report_sent)
+        //                 {
+        //                     onboard_bmx280.last_report_unix = mcu_time_unix;
+        //                 }
+        //             }
 
-                    if (ESP_OK == ac_input_report_rdy)
-                    {
-                        // /*continous_adc_manager.get_service_data_ac_input(mqtt_service_data_buffer, 2048, 3);*/
-                        continous_adc_manager.get_service_data_report(mqtt_service_data_buffer, 2048, 3);
-                        ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
-                        snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
-                        report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
+        //             if (ESP_OK == ac_input_report_rdy)
+        //             {
+        //                 // /*continous_adc_manager.get_service_data_ac_input(mqtt_service_data_buffer, 2048, 3);*/
+        //                 continous_adc_manager.get_service_data_report(mqtt_service_data_buffer, 2048, 3);
+        //                 ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
+        //                 snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
+        //                 report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
 
-                        // /*continous_adc_manager.get_service_data_ac_input(mqtt_service_data_buffer, 2048, 4);*/
-                        //continous_adc_manager.get_service_data_report(mqtt_service_data_buffer, 2048, 4);
-                        //ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
-                        //snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
-                        //report_sent = ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
+        //                 // /*continous_adc_manager.get_service_data_ac_input(mqtt_service_data_buffer, 2048, 4);*/
+        //                 //continous_adc_manager.get_service_data_report(mqtt_service_data_buffer, 2048, 4);
+        //                 //ESP_LOGI("service_data", "%s", mqtt_service_data_buffer);
+        //                 //snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
+        //                 //report_sent = ha_websoc.send_text(msg, "\"success\":true", nullptr, 2000);
 
-                        if(ESP_OK == report_sent){
-                            continous_adc_manager.last_report_unix = mcu_time_unix;
-                        }
-                    }
+        //                 if(ESP_OK == report_sent){
+        //                     continous_adc_manager.last_report_unix = mcu_time_unix;
+        //                 }
+        //             }
 
-                    ccs811_sensor.get_service_data_report(mqtt_service_data_buffer, 2048);
-                    ESP_LOGD("service_data", "%s", mqtt_service_data_buffer);
-                    snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
-                    report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
+        //             ccs811_sensor.get_service_data_report(mqtt_service_data_buffer, 2048);
+        //             ESP_LOGD("service_data", "%s", mqtt_service_data_buffer);
+        //             snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
+        //             report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
 
-                    hall_angle_sensor.get_service_data_report(mqtt_service_data_buffer, 2048, 60000000.0 / (1.0 + (float)(wind_hall.pulse_low_us + wind_hall.pulse_high_us)), wind_hall.edge_count);
-                    ESP_LOGD("service_data", "%s", mqtt_service_data_buffer);
-                    snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
-                    report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
+        //             hall_angle_sensor.get_service_data_report(mqtt_service_data_buffer, 2048, 60000000.0 / (1.0 + (float)(wind_hall.pulse_low_us + wind_hall.pulse_high_us)), wind_hall.edge_count);
+        //             ESP_LOGD("service_data", "%s", mqtt_service_data_buffer);
+        //             snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
+        //             report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
 
-                    hive_scale.get_service_data_report(mqtt_service_data_buffer, 2048);
-                    ESP_LOGD("service_data", "%s", mqtt_service_data_buffer);
-                    snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
-                    report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
+        //             hive_scale.get_service_data_report(mqtt_service_data_buffer, 2048);
+        //             ESP_LOGD("service_data", "%s", mqtt_service_data_buffer);
+        //             snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
+        //             report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
 
-                    // sensor_measurement_report.evaluate_send_time(mcu_time_unix);
+        //             // sensor_measurement_report.evaluate_send_time(mcu_time_unix);
                     
-                    // mcu_info.add_to_report(sensor_measurement_report);
-                    // tail_bmx280.add_to_report(sensor_measurement_report, 0u);
-                    // onboard_bmx280.add_to_report(sensor_measurement_report, 1u);
-                    // hall_angle_sensor.add_to_report(sensor_measurement_report, 10);
-                    // wlan_interface.add_to_report(sensor_measurement_report);
-                    // hive_scale.add_to_report(sensor_measurement_report);
-                    // DS18B20::add_to_report(sensor_measurement_report);
-                    // mcu_info.add_to_report(sensor_measurement_report);
-                    /*sensor_measurement_report.sort_keyval_array_by_group();*/
-                    
-
+        //             // mcu_info.add_to_report(sensor_measurement_report);
+        //             // tail_bmx280.add_to_report(sensor_measurement_report, 0u);
+        //             // onboard_bmx280.add_to_report(sensor_measurement_report, 1u);
+        //             // hall_angle_sensor.add_to_report(sensor_measurement_report, 10);
+        //             // wlan_interface.add_to_report(sensor_measurement_report);
+        //             // hive_scale.add_to_report(sensor_measurement_report);
+        //             // DS18B20::add_to_report(sensor_measurement_report);
+        //             // mcu_info.add_to_report(sensor_measurement_report);
+        //             /*sensor_measurement_report.sort_keyval_array_by_group();*/
                     
 
-                    // DS18B20::get_service_data_report(mqtt_service_data_buffer, 2048);
-                    // ESP_LOGD("service_data", "%s", mqtt_service_data_buffer);
-                    // snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
                     
-                    sensor_measurement_report.get_websoc_text(msg, 2048, ha_websoc.ha_websoc_header_template);
-                    report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
 
-                    wind_hall.pulse_low_us = 0;
-                    wind_hall.pulse_high_us = 0;
-                    wind_hall.edge_count = 0;
+        //             // DS18B20::get_service_data_report(mqtt_service_data_buffer, 2048);
+        //             // ESP_LOGD("service_data", "%s", mqtt_service_data_buffer);
+        //             // snprintf(msg, 2048, ha_websoc.ha_websoc_header_template, mqtt_service_data_buffer);
+                    
+        //             sensor_measurement_report.get_websoc_text(msg, 2048, ha_websoc.ha_websoc_header_template);
+        //             report_sent = ha_websoc.send_text(msg, "\"success\":true", "\"success\":false", 2000);
 
-                    ESP_LOGI("hello", "awake vs sleep seconds: %lld : %lld", nv_mcu_awake_sec, nv_mcu_sleep_sec);
-                }
+        //             wind_hall.pulse_low_us = 0;
+        //             wind_hall.pulse_high_us = 0;
+        //             wind_hall.edge_count = 0;
 
-                ha_websoc.disconnect();
-                rdy_to_report = false;
+        //             ESP_LOGI("hello", "awake vs sleep seconds: %lld : %lld", nv_mcu_awake_sec, nv_mcu_sleep_sec);
+        //         }
 
-                wlan_interface.fastScan();
-                vTaskDelay(200/portTICK_PERIOD_MS);
-                night_man.update_awake_time();
-                night_man.schedule_rtc_wakeup(40 * 1000);
-                night_man.enter_deep_sleep();
+        //         ha_websoc.disconnect();
+        //         rdy_to_report = false;
+
+        //         wlan_interface.fastScan();
+        //         vTaskDelay(200/portTICK_PERIOD_MS);
+        //         night_man.update_awake_time();
+        //         night_man.schedule_rtc_wakeup(40 * 1000);
+        //         //night_man.enter_deep_sleep();
                 
                 
-            }
-        }
+        //     }
+        // }
     }
     //@TODO: add this back in, but with new methods for generating report
     // else
