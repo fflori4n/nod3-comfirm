@@ -23,6 +23,7 @@
 
 #include <cstring>
 #include <string>
+#include <mutex>
 
 namespace NETWORK
 {
@@ -34,31 +35,29 @@ namespace NETWORK
             constexpr static char* net_scan_tag{COLOR_BLUE "NET_SCAN" COLOR_WHITE};
             constexpr static char* network_async_tag{COLOR_CYAN "NETWORK_ASINC" COLOR_WHITE};
 
+            
+            static inline std::mutex wlan_state_mutex{};
+            static inline std::mutex wifi_driver_mutex{};
+            static inline std::mutex wifi_driver_callback_mutex{};  /* Maybe it makes sense to use a separate mutex for callbacks because they are async compred to main task. */
+
             enum class wlan_state_t
             {
-                waiting_init,
-                inactive,
-                standby,
-                sta_wait_for_connection,
-                sta_wait_for_ip,
-                sta_connection_ok,
-                sta_connection_stable,
-                ap_active,
-                power_down,
-                error,
+                NOT_INITIALIZED,
+                INTERFACE_DOWN,
+                NOT_CONNECTED,
+                STA_CONNECT,
+                WAITING_EVENT_STA_CONNECT,
+                WAITING_EVENT_STA_GOT_IP,
+                STA_CONNECTION_ESTABLISHED,
+                STA_CONNECTED_RDY,
+                AP_ACTIVE_RDY,
+                STA_DISCONNECTED,
+                STA_REQUEST_DISCONNECT,
+                POWERING_DOWN,
+                ER_UNDEFINED_ERROR,
+                ER_UNABLE_TO_LOCK,
                 /* END */
                 numof_wlan_states
-            };
-
-            
-
-            
-
-            enum class wifi_power_save_e{
-
-                psave_disabled = WIFI_PS_NONE,
-                psave_default = WIFI_PS_MIN_MODEM,
-                psave_maximum = WIFI_PS_MAX_MODEM
             };
 
             typedef struct
@@ -108,12 +107,19 @@ namespace NETWORK
 
         private:
             char macAddressCStr[12+1]{};
-            static wlan_state_t _wlanIfaceState;
+
+            static wlan_state_t wlan_state;
+            
+            
+
             static wifi_init_config_t _wifiInitCfg;
             static wifi_config_t _wifiConfig;
 
             esp_netif_t* p_netif;
         public:
+
+            /*static wlan_state_t previous_wlan_state;*/
+            inline static uint32_t  switched_state_tm = 0;
 
             static constexpr uint64_t espressif_macs[] = {0x048308,0x083A8D,0x083AF2,0x08A6F7,0x08B61F,0x08D1F9,0x08F9E0,0x0C8B95,0x0CB815,0x0CDC7E,0x10003B,0x10061C,0x10521C,0x1091A8,0x1097BD,0x142B2F,0x188B0E,0x18FE34,0x1C6920,0x1C9DC2,0x2043A8,0x240AC4,0x244CAB,0x24587C,0x2462AB,0x246F28,0x24A160,0x24B2DE,0x24D7EB,0x24DCC3,0x24EC4A,0x28372F,0x2C3AE8,0x2CBCBB,0x2CF432,0x3030F9,0x308398,0x30AEA4,0x30C6F7,0x30C922,0x30EDA0,0x345F45,0x348518,0x34865D,0x349454,0x34987A,0x34AB95,0x34B472,0x34B7DA,0x34CDB0,0x38182B,0x3C6105,0x3C71BF,0x3C8427,0x3C8A1F,0x3CE90E,0x4022D8,0x404CCA,0x409151,0x40F520,0x441793,0x4827E2,0x4831B7,0x483FDA,0x485519,0x48CA43,0x48E729,0x4C11AE,0x4C7525,0x4CEBD6,0x500291,0x543204,0x5443B2,0x545AA6,0x588C81,0x58BF25,0x58CF79,0x5C013B,0x5CCF7F,0x600194,0x6055F9,0x64B708,0x64E833,0x686725,0x68B6B3,0x68C63A,0x6CB456,0x70039F,0x70041D,0x70B8F6,0x744DBD,0x782184,0x78421C,0x78E36D,0x78EE4C,0x7C2C67,0x7C7398,0x7C87CE,0x7C9EBD,0x7CDFA1,0x80646F,0x806599,0x807D3A,0x840D8E,0x84CCA8,0x84F3EB,0x84F703,0x84FCE6,0x8813BF,0x8C4B14,0x8C4F00,0x8CAAB5,0x8CBFEA,0x8CCE4E,0x901506,0x90380C,0x9097D5,0x943CC6,0x9454C5,0x94A990,0x94B555,0x94B97E,0x94E686,0x983DAE,0x98CDAC,0x98F4AB,0x9C9C1F,0x9C9E6E,0xA020A6,0xA0764E,0xA085E3,0xA0A3B3,0xA0B765,0xA0DD6C,0xA47B9D,0xA4CF12,0xA4E57C,0xA8032A,0xA842E3,0xA848FA,0xAC0BFB,0xAC1518,0xAC67B2,0xACD074,0xB08184,0xB0A732,0xB0B21C,0xB43A45,0xB48A0A,0xB4E62D,0xB8D61A,0xB8F009,0xBCDDC2,0xBCFF4D,0xC049EF,0xC04E30,0xC05D89,0xC44F33,0xC45BBE,0xC4D8D5,0xC4DD57,0xC4DEE2,0xC82B96,0xC82E18,0xC8C9A3,0xC8F09E,0xCC50E3,0xCC7B5C,0xCC8DA2,0xCCBA97,0xCCDBA7,0xD0EF76,0xD48AFC,0xD48C49,0xD4D4DA,0xD4F98D,0xD8132A,0xD83BDA,0xD8A01D,0xD8BC38,0xD8BFC0,0xD8F15B,0xDC0675,0xDC1ED5,0xDC4F22,0xDC5475,0xDCDA0C,0xE05A1B,0xE09806,0xE0E2E6,0xE465B8,0xE4B063,0xE4B323,0xE80690,0xE831CD,0xE868E7,0xE86BEA,0xE89F6D,0xE8DB84,0xEC6260,0xEC64C9,0xEC94CB,0xECC9FF,0xECDA3B,0xECFABC,0xF008D1,0xF024F9,0xF09E9E,0xF0F5BD,0xF412FA,0xF4650B,0xF4CFA2,0xF8B3B7,0xFCB467,0xFCE8C0,0xFCF5C4,};
            
@@ -138,8 +144,8 @@ namespace NETWORK
 
                 public:
 
-                char ssid[20];
-                char passwd[20];
+                char ssid[32];
+                char passwd[64];
                 uint64_t device_mac;
                 uint8_t channel;
                 int8_t low_rssi_tresh;
@@ -298,8 +304,6 @@ namespace NETWORK
             static RTC_FAST_ATTR wlan_manager_stats_t statistics;
 
             uint16_t scan_period_counter = 0;
-
-            static wifi_power_save_e wifi_power_save_mode;
             constexpr static char* log_label{"\x1b[34mNETWORK"};
             constexpr static char* log_label_scan{"\x1b[34mSCAN"};
 
@@ -309,9 +313,7 @@ namespace NETWORK
             static bool wifi_ext_task_inhibit_flag;
             inline static char* ssid_name = "";
 
-            static std::mutex wifi_driver_mutex;
-            /* Maybe it makes sense to use a separate mutex for callbacks because they are async compred to main task. */
-            static std::mutex wifi_driver_callback_mutex;
+            
 
             uint16_t num_of_active_ap_scanned = maximum_number_of_APs;
             inline RTC_FAST_ATTR static wifi_ap_record_t ap_info[maximum_number_of_APs];
@@ -319,36 +321,14 @@ namespace NETWORK
             
 
         private:
-            static esp_err_t _init(void);
-            static void _wifiEventHandler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id,void *event_data);
+            static void network_event_handler(void *event_handler_arg, esp_event_base_t event_base, int32_t event_id,void *event_data);
         public:
-            Wlan(void);
-            ~Wlan(void)                     = default;
-            Wlan(const Wlan&)               = default;
-            Wlan(Wlan&&)                    = default;
-            Wlan& operator=(const Wlan&)    = default;
-            Wlan& operator=(Wlan&&)         = default;
 
             esp_err_t init(void);
-            /*void fast_scan(void)*/
-            esp_err_t sta_connect(void);
-            esp_err_t begin(char* ssid, char* passwd);
             esp_err_t start_ap(void);
-
-            template<typename cstr_type> esp_err_t sta_connect(cstr_type* &ssid, cstr_type* &passwd);
-            esp_err_t disconnect_power_off(void);
-
-            static esp_err_t is_connected(void) {
-                
-                // if(false != Wlan::wifi_ext_task_inhibit_flag)
-                // {
-                //     return ESP_ERR_NOT_ALLOWED;
-                // }
-                return (wlan_state_t::sta_connection_ok == _wlanIfaceState ) ? (ESP_OK) : (ESP_FAIL);
-            }
-            
-            esp_err_t loadMACAddress(void);
             esp_err_t fastScan(void);
+
+            static float estimate_ap_dist_from_rssi(int8_t rssi);
 
             static void wlan_promiscuous_handler(void *buff, wifi_promiscuous_pkt_type_t type);
             static esp_err_t collect_wifi_device(wlan_scan_devices_t pckt_source_device);
@@ -359,16 +339,8 @@ namespace NETWORK
             static uint16_t count_all_sta(void);
             static uint16_t count_ap_on_channel(uint8_t channel);
             static uint16_t count_all_ap(void);
-            static float estimate_ap_dist_from_rssi(int8_t rssi);
             static void calculate_nearby_dev_statistics(wlan_manager_stats_t &statistics, Wlan::Wlan_access_point &associated_ap);
-            esp_err_t set_wifi_connection_target(int8_t ap_index);
             
-
-            int16_t get_fraction(float value){
-                return (abs(((int16_t)(value * 100)) % 100));
-            }
-
-    
             esp_err_t get_service_data(char *text_buffer, int16_t text_buffer_size)
             {
 
@@ -393,151 +365,140 @@ namespace NETWORK
                 return ESP_OK;
             }
 
-            esp_err_t add_to_report(Report_builder& report_buildr){
+            wlan_state_t get_wlan_state(void) {
+                std::unique_lock<std::mutex> lock(wlan_state_mutex, std::try_to_lock);
 
-                esp_wifi_sta_get_rssi(&statistics.rssi);
-                report_buildr.add_keyval(Report_group_e::DEV_WLAN_CON, "w_rssi", (void*)&(statistics.rssi), Type_e::INT32, {-100.0f, 0.0f});
+                if (true == lock.owns_lock())
+                {
+                    return wlan_state;
+                }
+                else 
+                {
+                    return wlan_state_t::ER_UNABLE_TO_LOCK;
+                }
+            }
 
-                statistics.estimated_distance_from_ap = estimate_ap_dist_from_rssi(statistics.rssi);
-                report_buildr.add_keyval(Report_group_e::DEV_WLAN_CON, "w_dest", (void*)&(statistics.estimated_distance_from_ap), Type_e::FLOAT32, {0.0f, 500.0f});
-            
-                uint32_t number_of_dev_on_ch = statistics.num_of_ap_current_channel + statistics.num_of_sta_current_channel;
-                uint32_t total_number_of_dev = statistics.num_of_ap + statistics.num_of_sta;
-                uint32_t connected_dev = statistics.num_of_sta_connected_to_ap;
+            esp_err_t set_wlan_state(const wlan_state_t new_wlan_state){
+                std::unique_lock<std::mutex>lock(wlan_state_mutex, std::try_to_lock);
 
-                statistics.connection_ok_hours = statistics.connection_ok_sec* 1.0/3600.0;
-                report_buildr.add_keyval(Report_group_e::DEV_WLAN_CON, "w_con_tm", (void*)&(statistics.connection_ok_hours), Type_e::FLOAT32);
-                report_buildr.add_keyval(Report_group_e::DEV_WLAN_CON, "w_recon", (void*)&(statistics.num_of_reconnect), Type_e::INT32);
-                report_buildr.add_keyval(Report_group_e::DEV_WLAN_CON, "w_ssid", (void*)(user_cfg_basic.ssid), Type_e::PCHAR_STR);
-                report_buildr.add_keyval(Report_group_e::DEV_WLAN_CON, "w_condev", (void*)&(connected_dev), Type_e::INT32);
-                report_buildr.add_keyval(Report_group_e::DEV_WLAN_CON, "w_alldev", (void*)&(total_number_of_dev), Type_e::INT32);
-                report_buildr.add_keyval(Report_group_e::DEV_WLAN_CON, "w_chdev", (void*)&(number_of_dev_on_ch), Type_e::INT32);
-                
+                if(true == lock.owns_lock())
+                {
+                    if(wlan_state != new_wlan_state)
+                    {
+                        ESP_LOGI(NETWORK::Wlan::network_tag, "wlan state switched to %s from %s after %lld secs.", Wlan::wlan_state_to_cstr(new_wlan_state), Wlan::wlan_state_to_cstr(wlan_state), ((esp_timer_get_sec() + 1) - switched_state_tm));
+                        wlan_state = new_wlan_state;
+                        switched_state_tm = esp_timer_get_sec();
+                    }
+                }
+                else
+                {
+                    return ESP_FAIL;
+                }
+
                 return ESP_OK;
             }
 
-            wlan_state_t get_wlan_state(void) { return _wlanIfaceState; };
+            static const char* wlan_state_to_cstr(wlan_state_t state)
+            {
+                switch (state) {
+                    case wlan_state_t::NOT_INITIALIZED:               return "NOT_INITIALIZED";
+                    case wlan_state_t::INTERFACE_DOWN:                return "INTERFACE_DOWN";
+                    case wlan_state_t::NOT_CONNECTED:                 return "NOT_CONNECTED";
+                    case wlan_state_t::STA_CONNECT:                   return "STA_CONNECT";
+                    case wlan_state_t::WAITING_EVENT_STA_CONNECT:     return "WAITING_EVENT_STA_CONNECT";
+                    case wlan_state_t::WAITING_EVENT_STA_GOT_IP:      return "WAITING_EVENT_STA_GOT_IP";
+                    case wlan_state_t::STA_CONNECTION_ESTABLISHED:    return "STA_CONNECTION_ESTABLISHED";
+                    case wlan_state_t::STA_CONNECTED_RDY:             return "STA_CONNECTED_RDY";
+                    case wlan_state_t::AP_ACTIVE_RDY:                 return "AP_ACTIVE_RDY";
+                    case wlan_state_t::STA_DISCONNECTED:              return "STA_DISCONNECTED";
+                    case wlan_state_t::STA_REQUEST_DISCONNECT:        return "STA_REQUEST_DISCONNECT";
+                    case wlan_state_t::POWERING_DOWN:                 return "POWERING_DOWN";
+                    case wlan_state_t::ER_UNDEFINED_ERROR:            return "ER_UNDEFINED_ERROR";
+                    case wlan_state_t::ER_UNABLE_TO_LOCK:             return "ER_UNABLE_TO_LOCK";
+                    default:                                          return "UNKNOWN";
+                }
+            }
 
-            static constexpr char wlan_state_text_lut[static_cast<uint8_t>(wlan_state_t::numof_wlan_states)][30] = {
-                "net_not_inited",
-                "net_inactive  ",
-                "driver_standby",
-                "sta_connecting",
-                "sta_wait_ip   ",
-                "sta_connected ",
-                "sta_con_stable",
-                "ap_active     ",
-                "net_power_down",
-                "net_error     "
-                };
-            
-            const char* get_wlan_state_str(void) { 
-                                /* TODO: blah check for null or out of bounds. */
-                return wlan_state_text_lut[static_cast<uint8_t>(_wlanIfaceState)];
+            inline bool is_sta_connected(void)
+            {
+                wlan_state_t current_state = get_wlan_state();
+
+                /* NOTE: wlan_state_t::STA_CONNECTION_ESTABLISHED will return false, it should switch to wlan_state_t::STA_CONNECTED_RDY in a short time, unless our device gets disconnected immediatelly*/
+                if(wlan_state_t::STA_CONNECTED_RDY == current_state)
+                {
+                    return true;
+                }
+
+                return false;
             };
 
-            void set_wlan_state(wlan_state_t new_state){ _wlanIfaceState = new_state;}
-
-            inline bool network_ready(void){ return (wlan_state_t::sta_connection_ok == _wlanIfaceState) ? true : false; };
-
-            constexpr char* getMACAddressCStr(void){ return macAddressCStr; };
-
-            static const char* ip_event_to_string(ip_event_t key)
+            static const char* ip_event_to_string(ip_event_t event)
             {
-                constexpr std::array<std::pair<ip_event_t, const char *>, 8> event_to_str_map = {{
-                    {IP_EVENT_STA_GOT_IP, "STA_GOT_IP"},
-                    {IP_EVENT_STA_LOST_IP, "\x1b[31mSTA_LOST_IP"},
-                    {IP_EVENT_GOT_IP6, "GOT_IP6"},
-                    {IP_EVENT_ETH_GOT_IP, "ETH_GOT_IP"},
-                    {IP_EVENT_ETH_LOST_IP, "ETH_LOST_IP"},
-                    {IP_EVENT_PPP_GOT_IP, "PPP_GOT_IP"},
-                    {IP_EVENT_PPP_LOST_IP, "PPP_LOST_IP"},
-                    {IP_EVENT_TX_RX, "RX_TX"}
-                }};
-
-                for (auto &pair : event_to_str_map)
-                {
-                    if (pair.first == key)
-                    {
-                        return pair.second;
-                    }
+                switch (event) {
+                    case IP_EVENT_STA_GOT_IP:    return "STA_GOT_IP";
+                    case IP_EVENT_STA_LOST_IP:   return "STA_LOST_IP";
+                    case IP_EVENT_GOT_IP6:       return "GOT_IP6";
+                    case IP_EVENT_ETH_GOT_IP:    return "ETH_GOT_IP";
+                    case IP_EVENT_ETH_LOST_IP:   return "ETH_LOST_IP";
+                    case IP_EVENT_PPP_GOT_IP:    return "PPP_GOT_IP";
+                    case IP_EVENT_PPP_LOST_IP:   return "PPP_LOST_IP";
+                    case IP_EVENT_TX_RX:         return "RX_TX";
+                    default:                     return "UNDEFINED";
                 }
-
-                return "UNDEFINED";
             }
 
-            static const char* wifi_event_to_string(wifi_event_t key)
+            static const char* wifi_event_to_string(wifi_event_t event)
             {
-                constexpr std::array<std::pair<wifi_event_t, const char *>, 45> event_to_str_map = {{
-
-                    {WIFI_EVENT_WIFI_READY, "WIFI_READY"},
-                    {WIFI_EVENT_SCAN_DONE, "SCAN_FINISHED"},
-                    {WIFI_EVENT_STA_START, "STA_START"},
-                    {WIFI_EVENT_STA_STOP, "STA_STOP"},
-                    {WIFI_EVENT_STA_CONNECTED, "STA_CONNECTED"},
-                    {WIFI_EVENT_STA_DISCONNECTED, "\x1b[31mSTA_DISCONNECTED"},
-                    {WIFI_EVENT_STA_AUTHMODE_CHANGE, "STA_AUTHMODE_CHANGE"},
-
-                    {WIFI_EVENT_STA_WPS_ER_SUCCESS, "WPS_ER_SUCCESS"},
-                    {WIFI_EVENT_STA_WPS_ER_FAILED, "WPS_ER_FAILED"},
-                    {WIFI_EVENT_STA_WPS_ER_TIMEOUT, "WPS_ER_TIMEOUT"},
-                    {WIFI_EVENT_STA_WPS_ER_PIN, "WPS_ER_PIN"},
-                    {WIFI_EVENT_STA_WPS_ER_PBC_OVERLAP, "WPS_ER_PBC_OVERLAP"},
-
-                    {WIFI_EVENT_AP_START, "AP_START"},
-                    {WIFI_EVENT_AP_STOP, "AP_STOP"},
-                    {WIFI_EVENT_AP_STACONNECTED, "AP_STADEV_CONNECT"},
-                    {WIFI_EVENT_AP_STADISCONNECTED, "AP_STADEV_DISCONNECT"},
-                    {WIFI_EVENT_AP_PROBEREQRECVED, "AP_PROBE_REQ"},
-
-                    {WIFI_EVENT_FTM_REPORT, "FTM_REPORT_RDY"},
-
-                    {WIFI_EVENT_STA_BSS_RSSI_LOW, "RSSI_LOW_ALERT"},
-                    {WIFI_EVENT_ACTION_TX_STATUS, "ACTION_TX_STATUS"},
-                    {WIFI_EVENT_ROC_DONE, "ROC_DONE"},
-
-                    {WIFI_EVENT_STA_BEACON_TIMEOUT, "\x1b[31mSTA_BEACON_TIMEOUT"},
-
-                    {WIFI_EVENT_CONNECTIONLESS_MODULE_WAKE_INTERVAL_START, "CONNECTIONLESS_MODULE_WAKE_INTERVAL_START"},
-
-                    {WIFI_EVENT_AP_WPS_RG_SUCCESS, "AP_WPS_RG_SUCCESS"},
-                    {WIFI_EVENT_AP_WPS_RG_FAILED, "AP_WPS_RG_FAILED"},
-                    {WIFI_EVENT_AP_WPS_RG_TIMEOUT, "AP_WPS_RG_TIMEOUT"},
-                    {WIFI_EVENT_AP_WPS_RG_PIN, "AP_WPS_RG_PIN"},
-                    {WIFI_EVENT_AP_WPS_RG_PBC_OVERLAP, "AP_WPS_RG_PBC_OVERLAP"},
-
-                    {WIFI_EVENT_ITWT_SETUP, "ITWT_SETUP"},
-                    {WIFI_EVENT_ITWT_TEARDOWN, "ITWT_TEARDOWN"},
-                    {WIFI_EVENT_ITWT_PROBE, "ITWT_PROBE"},
-                    {WIFI_EVENT_ITWT_SUSPEND, "ITWT_SUSPEND"},
-                    {WIFI_EVENT_TWT_WAKEUP, "TWT_WAKEUP"},
-                    {WIFI_EVENT_BTWT_SETUP, "BTWT_SETUP"},
-                    {WIFI_EVENT_BTWT_TEARDOWN, "BTWT_TEARDOWN"},
-
-                    {WIFI_EVENT_NAN_STARTED, "NAN_STARTED"},
-                    {WIFI_EVENT_NAN_STOPPED, "NAN_STOPPED"},
-                    {WIFI_EVENT_NAN_SVC_MATCH, "NAN_SVC_MATCH"},
-                    {WIFI_EVENT_NAN_REPLIED, "NAN_REPLIED"},
-                    {WIFI_EVENT_NAN_RECEIVE, "NAN_RECEIVE"},
-                    {WIFI_EVENT_NDP_INDICATION, "NDP_INDICATION"},
-                    {WIFI_EVENT_NDP_CONFIRM, "NDP_CONFIRM"},
-                    {WIFI_EVENT_NDP_TERMINATED, "NDP_TERMINATED"},
-
-                    {WIFI_EVENT_HOME_CHANNEL_CHANGE, "HOME_CHANNEL_CHANGE"},
-                    {WIFI_EVENT_STA_NEIGHBOR_REP, "STA_NEIGHBOR_REP"},
-
-                }};
-
-                for (auto &pair : event_to_str_map)
-                {
-                    if (pair.first == key)
-                    {
-                        return pair.second;
-                    }
+                switch (event) {
+                    case WIFI_EVENT_WIFI_READY:             return "WIFI_READY";
+                    case WIFI_EVENT_SCAN_DONE:              return "SCAN_FINISHED";
+                    case WIFI_EVENT_STA_START:              return "STA_START";
+                    case WIFI_EVENT_STA_STOP:               return "STA_STOP";
+                    case WIFI_EVENT_STA_CONNECTED:          return "STA_CONNECTED";
+                    case WIFI_EVENT_STA_DISCONNECTED:       return "\x1b[31mSTA_DISCONNECTED";
+                    case WIFI_EVENT_STA_AUTHMODE_CHANGE:    return "STA_AUTHMODE_CHANGE";
+                    case WIFI_EVENT_STA_WPS_ER_SUCCESS:     return "WPS_ER_SUCCESS";
+                    case WIFI_EVENT_STA_WPS_ER_FAILED:      return "WPS_ER_FAILED";
+                    case WIFI_EVENT_STA_WPS_ER_TIMEOUT:     return "WPS_ER_TIMEOUT";
+                    case WIFI_EVENT_STA_WPS_ER_PIN:         return "WPS_ER_PIN";
+                    case WIFI_EVENT_STA_WPS_ER_PBC_OVERLAP: return "WPS_ER_PBC_OVERLAP";
+                    case WIFI_EVENT_AP_START:               return "AP_START";
+                    case WIFI_EVENT_AP_STOP:                return "AP_STOP";
+                    case WIFI_EVENT_AP_STACONNECTED:        return "AP_STADEV_CONNECT";
+                    case WIFI_EVENT_AP_STADISCONNECTED:     return "AP_STADEV_DISCONNECT";
+                    case WIFI_EVENT_AP_PROBEREQRECVED:      return "AP_PROBE_REQ";
+                    case WIFI_EVENT_FTM_REPORT:             return "FTM_REPORT_RDY";
+                    case WIFI_EVENT_STA_BSS_RSSI_LOW:       return "RSSI_LOW_ALERT";
+                    case WIFI_EVENT_ACTION_TX_STATUS:       return "ACTION_TX_STATUS";
+                    case WIFI_EVENT_ROC_DONE:               return "ROC_DONE";
+                    case WIFI_EVENT_STA_BEACON_TIMEOUT:     return "\x1b[31mSTA_BEACON_TIMEOUT";
+                    case WIFI_EVENT_CONNECTIONLESS_MODULE_WAKE_INTERVAL_START: return "CONNECTIONLESS_MODULE_WAKE_INTERVAL_START";
+                    case WIFI_EVENT_AP_WPS_RG_SUCCESS:      return "AP_WPS_RG_SUCCESS";
+                    case WIFI_EVENT_AP_WPS_RG_FAILED:       return "AP_WPS_RG_FAILED";
+                    case WIFI_EVENT_AP_WPS_RG_TIMEOUT:      return "AP_WPS_RG_TIMEOUT";
+                    case WIFI_EVENT_AP_WPS_RG_PIN:          return "AP_WPS_RG_PIN";
+                    case WIFI_EVENT_AP_WPS_RG_PBC_OVERLAP:  return "AP_WPS_RG_PBC_OVERLAP";
+                    case WIFI_EVENT_ITWT_SETUP:             return "ITWT_SETUP";
+                    case WIFI_EVENT_ITWT_TEARDOWN:          return "ITWT_TEARDOWN";
+                    case WIFI_EVENT_ITWT_PROBE:             return "ITWT_PROBE";
+                    case WIFI_EVENT_ITWT_SUSPEND:           return "ITWT_SUSPEND";
+                    case WIFI_EVENT_TWT_WAKEUP:             return "TWT_WAKEUP";
+                    case WIFI_EVENT_BTWT_SETUP:             return "BTWT_SETUP";
+                    case WIFI_EVENT_BTWT_TEARDOWN:          return "BTWT_TEARDOWN";
+                    case WIFI_EVENT_NAN_STARTED:            return "NAN_STARTED";
+                    case WIFI_EVENT_NAN_STOPPED:            return "NAN_STOPPED";
+                    case WIFI_EVENT_NAN_SVC_MATCH:          return "NAN_SVC_MATCH";
+                    case WIFI_EVENT_NAN_REPLIED:            return "NAN_REPLIED";
+                    case WIFI_EVENT_NAN_RECEIVE:            return "NAN_RECEIVE";
+                    case WIFI_EVENT_NDP_INDICATION:         return "NDP_INDICATION";
+                    case WIFI_EVENT_NDP_CONFIRM:            return "NDP_CONFIRM";
+                    case WIFI_EVENT_NDP_TERMINATED:         return "NDP_TERMINATED";
+                    case WIFI_EVENT_HOME_CHANNEL_CHANGE:    return "HOME_CHANNEL_CHANGE";
+                    case WIFI_EVENT_STA_NEIGHBOR_REP:       return "STA_NEIGHBOR_REP";
+                    default:                                return "UNDEFINED";
                 }
-
-                return "UNDEFINED";
             }
+
 
             static const char* known_device_by_mac(uint64_t mac)
             {
