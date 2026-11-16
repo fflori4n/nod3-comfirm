@@ -27,10 +27,18 @@ namespace Nvs_Manager{
     typedef struct user_cfg_critical_t{
 
         uint8_t rdy_for_update;
-        char ssid[40];
-        char passwd[40];
+        char ssid[32];
+        char passwd[64];
         char device_name[40];   /* TODO: consider using the MAC addr or something to get a unique ID, and give friendly name on server side? */
         char websoc_endpoint_url[40];
+
+        void debug_print()
+        {
+            ESP_LOGW(sys_up_tag, "\t>SSID: %s", ssid);
+            ESP_LOGW(sys_up_tag, "\t>PASS: %s", passwd);
+            ESP_LOGW(sys_up_tag, "\t>SENS: %s", device_name);
+            ESP_LOGW(sys_up_tag, "\t>WSOC: %s", websoc_endpoint_url);
+        }
 
     }user_cfg_critical_t;
 

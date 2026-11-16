@@ -16,11 +16,14 @@ constexpr static char* log_tmmeas{COLOR_BLUE"TMMEAS"COLOR_WHITE};
 enum class Log_status_t : uint8_t {
     UNPROCESSED  = 0b000,
     RDY_TO_SEND  = 0b001,
-    SEND_SUCCESS = 0b010,
-    SEND_FAIL    = 0b011
+    IN_PROGRESS  = 0b010,
+    SEND_RETRY   = 0b011,
+    SEND_SUCCESS = 0b100,
+    SEND_FAIL    = 0b101,
+    DISCARD      = 0b110
 };
 
-char log_status_str[][15] = {"UNPROCESSED", "RDY_TO_SEND", "SEND_SUCCESS", "SEND_FAIL"};
+char log_status_str[][15] = {"UNPROCESSED", "RDY_TO_SEND", "IN_PROGRESS", "SEND_RETRY", "SEND_SUCCESS", "SEND_FAIL", "DISCARD"};
 
 enum class Data_encoding_t : uint8_t{
     BINARY     = 0,
@@ -53,11 +56,12 @@ enum class Measurement_type : uint8_t {
 class Measurement_entity_type
 {   
 private:
-    static constexpr uint16_t numof_tagbuff_bytes{32};
+    
 
 public:
+    static constexpr uint16_t tag_buff_size{20};
     Measurement_type measurement_type;
-    char tag[numof_tagbuff_bytes];
+    char tag[tag_buff_size];
     Data_encoding_t encoding;
     uint32_t range_max;
     uint32_t range_min;
@@ -69,12 +73,12 @@ public:
     Measurement_entity_type(const Measurement_type meas_type , const char *tag_ptr, Data_encoding_t enc, uint32_t min, uint32_t max, char *value_str_lookup, uint16_t measure_p, uint16_t send_p)
         : measurement_type(meas_type), encoding(enc), range_max(max), range_min(min), text_lookup(value_str_lookup), measure_period_min(measure_p), report_period_min(send_p)
     {
-        int16_t num_inbytes = std::snprintf(tag, numof_tagbuff_bytes, "%s", tag_ptr);
+        int16_t num_inbytes = std::snprintf(tag, tag_buff_size, "%s", tag_ptr);
         if (num_inbytes < 0)
         {
             ESP_LOGW(log_tmmeas, "Unexpected ER");
         }
-        else if (num_inbytes >= numof_tagbuff_bytes)
+        else if (num_inbytes >= tag_buff_size)
         {
             ESP_LOGW(log_tmmeas, "Tag was truncated");
         }
@@ -112,14 +116,16 @@ class Timestamped_measurement{
     private:
     public:
 
+        static constexpr uint16_t keyval_buffer_size{35};
+
         typedef union metadata_t{
             uint32_t u32;
             struct {
                 Measurement_type measurement_type    : 8;
                 uint16_t time_offset_secs            : 16;
                 uint8_t is_initialized               : 1;
-                Log_status_t weblog_status           : 3;
-                Log_status_t sdlog_status            : 3;
+                Log_status_t log_status              : 4;
+                uint8_t er_logged                    : 2;
                 uint8_t reserved_bits                : 1;
             };
         } metadata_t;
@@ -127,12 +133,13 @@ class Timestamped_measurement{
         metadata_t measurement_metadata;
         uint32_t data{0u};
 
+        static constexpr uint8_t value_str_buffer_size{25};
+
         Timestamped_measurement(){
             this->measurement_metadata.measurement_type = Measurement_type::SLOT_FREE;
             this->measurement_metadata.time_offset_secs = 0xFFFF;
             this->measurement_metadata.is_initialized = 0u;
-            this->measurement_metadata.sdlog_status = Log_status_t::UNPROCESSED;
-            this->measurement_metadata.weblog_status = Log_status_t::UNPROCESSED;
+            this->measurement_metadata.log_status = Log_status_t::UNPROCESSED;
             this->measurement_metadata.reserved_bits = 0u;
             this->data = 0x0000;
         };
@@ -141,8 +148,7 @@ class Timestamped_measurement{
             this->measurement_metadata.measurement_type = measurement_type_code;
             this->measurement_metadata.time_offset_secs = 0xFFFF;  /* Signal that time is not set for this measurement */
             this->measurement_metadata.is_initialized = 1u;
-            this->measurement_metadata.sdlog_status = Log_status_t::UNPROCESSED;
-            this->measurement_metadata.weblog_status = Log_status_t::UNPROCESSED;
+            this->measurement_metadata.log_status = Log_status_t::UNPROCESSED;
             this->measurement_metadata.reserved_bits = 0u;
             this->data = data;
         }
@@ -150,7 +156,16 @@ class Timestamped_measurement{
         /* Put conversion here, hopefully cleaner than random static cast at random places, float turned out to not behave well with static_cast */
         /* NOTE: did not do template to be more explicit and not sure how diffrent types w diff lengths would behave */
         Timestamped_measurement(Measurement_type measurement_type_code, int32_t data) : Timestamped_measurement(measurement_type_code, static_cast<uint32_t>(data)){}
-        Timestamped_measurement(Measurement_type measurement_type_code, float data) : Timestamped_measurement(measurement_type_code, std::bit_cast<uint32_t>(data)){}
+        /*Timestamped_measurement(Measurement_type measurement_type_code, float data) : Timestamped_measurement(measurement_type_code, std::bit_cast<uint32_t>(data)){}*/
+
+        void clear_slot(){
+            this->measurement_metadata.measurement_type = Measurement_type::SLOT_FREE;
+            this->measurement_metadata.time_offset_secs = 0xFFFF;
+            this->measurement_metadata.is_initialized = 0u;
+            this->measurement_metadata.log_status = Log_status_t::UNPROCESSED;
+            this->measurement_metadata.reserved_bits = 0u;
+            this->data = 0x0000;
+        }
 
         //constexpr bool operator==(const Timestamped_measurement& other) const = default;
         bool operator==(const Timestamped_measurement& other) const {
@@ -166,28 +181,96 @@ class Timestamped_measurement{
             return Data_encoding_t::_UNDEF;
         }
 
-        void print(const time_t& base_timestamp)
+        static const Measurement_entity_type& get_entity_type(auto sensor){
+
+            for(const Measurement_entity_type& measurement_ent_type : measurement_types){
+                if(sensor == measurement_ent_type.measurement_type){
+                    return measurement_ent_type;
+                }
+            }
+
+            return measurement_types[0];
+        }
+
+        void print(const time_t& base_timestamp, const time_t& now_unix_timestamp= 0)
         {
             Timestamped_measurement& measurement = *this;
             Data_encoding_t encoding = Timestamped_measurement::get_encoding(this->measurement_metadata.measurement_type);
+
+            auto get_time_str = [](time_t unix_time){
+
+                constexpr uint16_t sizeof_timestrbuffer{32};
+                std::array<char, sizeof_timestrbuffer> timestamp_string{};
+                std::tm timestamp_tm = *std::localtime(&unix_time);
+                std::strftime(&(timestamp_string[0]), sizeof_timestrbuffer, "%Y-%m-%dT%H:%M:%S%z", &timestamp_tm);
+                return timestamp_string;
+            };
+
+
+            auto get_time_diff_str = [base_timestamp, now_unix_timestamp, &measurement](void){
+
+                const time_t seconds_diff = (now_unix_timestamp - base_timestamp - measurement.measurement_metadata.time_offset_secs);
+                const uint32_t hours   = (seconds_diff / 3600);
+                const uint32_t minutes = (seconds_diff % 3600) / 60;
+                const uint32_t seconds = (seconds_diff % 60);
+
+                constexpr uint16_t sizeof_timestrbuffer{32};
+                std::array<char, sizeof_timestrbuffer> timestamp_string{};
+                snprintf(&(timestamp_string[0]), sizeof_timestrbuffer, "%02ld:%02ld:%02ld", hours, minutes, seconds);
+                return timestamp_string;
+            };
+
             switch (encoding)
             {
             case Data_encoding_t::BINARY:
-                ESP_LOGI("MEASUREMENT", "value: %s type: BIN, status: %s taken at: %0.4d-%0.2d-%0.2d %0.2d:%0.2d:%0.2d (offs: %ld)", (measurement.data == 0u ? "False" : "True"), log_status_str[measurement.measurement_metadata.weblog_status], PRINT_TMSTAMP(base_timestamp + measurement.measurement_metadata.time_offset_secs), measurement.measurement_metadata.time_offset_secs);
+                ESP_LOGI("MEASUREMENT", "value: %s type: BIN, status: %s taken at: %s (offs: %ld - %s ago)", (measurement.data == 0u ? "False" : "True"), log_status_str[static_cast<uint8_t>(measurement.measurement_metadata.log_status)], get_time_str(base_timestamp + measurement.measurement_metadata.time_offset_secs), measurement.measurement_metadata.time_offset_secs, get_time_diff_str());
                 break;
             case Data_encoding_t::UINT:
-                ESP_LOGI("MEASUREMENT", "value: %ld type: UINT32, status: %s taken at: %0.4d-%0.2d-%0.2d %0.2d:%0.2d:%0.2d (offs: %ld)", static_cast<uint32_t>(measurement.data), log_status_str[measurement.measurement_metadata.weblog_status], PRINT_TMSTAMP(base_timestamp + measurement.measurement_metadata.time_offset_secs), measurement.measurement_metadata.time_offset_secs);
+                ESP_LOGI("MEASUREMENT", "value: %ld type: UINT32, status: %s taken at: %s (offs: %ld - %s ago)", static_cast<uint32_t>(measurement.data), log_status_str[static_cast<uint8_t>(measurement.measurement_metadata.log_status)], get_time_str(base_timestamp + measurement.measurement_metadata.time_offset_secs), measurement.measurement_metadata.time_offset_secs, get_time_diff_str());
                 break;
             case Data_encoding_t::INT:
-                ESP_LOGI("MEASUREMENT", "value: %ld type: INT32, status: %s taken at: %0.4d-%0.2d-%0.2d %0.2d:%0.2d:%0.2d (offs: %ld)", static_cast<int32_t>(measurement.data), log_status_str[measurement.measurement_metadata.weblog_status], PRINT_TMSTAMP(base_timestamp + measurement.measurement_metadata.time_offset_secs), measurement.measurement_metadata.time_offset_secs);
+                ESP_LOGI("MEASUREMENT", "value: %ld type: INT32, status: %s taken at: %s (offs: %ld - %s ago)", static_cast<int32_t>(measurement.data), log_status_str[static_cast<uint8_t>(measurement.measurement_metadata.log_status)], get_time_str(base_timestamp + measurement.measurement_metadata.time_offset_secs), measurement.measurement_metadata.time_offset_secs, get_time_diff_str());
                 break;
             case Data_encoding_t::FLOAT:
-                ESP_LOGI("MEASUREMENT", "value: %0.2f type: FLOAT, status: %s taken at: %0.4d-%0.2d-%0.2d %0.2d:%0.2d:%0.2d (offs: %ld)", std::bit_cast<float>(measurement.data), log_status_str[measurement.measurement_metadata.weblog_status], PRINT_TMSTAMP(base_timestamp + measurement.measurement_metadata.time_offset_secs), measurement.measurement_metadata.time_offset_secs);
+                /*ESP_LOGI("MEASUREMENT", "value: %0.2f type: FLOAT, status: %s taken at: %s (offs: %ld - %s ago)", std::bit_cast<float>(measurement.data), log_status_str[static_cast<uint8_t>(measurement.measurement_metadata.log_status)], get_time_str(base_timestamp + measurement.measurement_metadata.time_offset_secs), measurement.measurement_metadata.time_offset_secs, get_time_diff_str());*/
                 break;
 
             default:
                 break;
             }
+        }
+
+        void get_service_data_keyval(char (&keyval_buffer)[50]){
+
+            const Timestamped_measurement& measurement = *this;
+            const Measurement_entity_type& sensor_type = Timestamped_measurement::get_entity_type(this->measurement_metadata.measurement_type);
+            if(sensor_type.measurement_type <= Measurement_type::SLOT_FREE){
+                return;
+            }
+
+            std::array<char, value_str_buffer_size> value_buffer{};
+
+            switch (sensor_type.encoding)
+            {
+                case Data_encoding_t::BINARY :
+                    snprintf(&(value_buffer[0]), value_str_buffer_size, "%d", measurement.data == 0u ? 0 : 1);
+                    break;
+                case Data_encoding_t::UINT :
+                    snprintf(&(value_buffer[0]), value_str_buffer_size, "%ld", static_cast<uint32_t>(measurement.data));
+                    break;
+                case Data_encoding_t::INT :
+                    snprintf(&(value_buffer[0]), value_str_buffer_size, "%ld", static_cast<int32_t>(measurement.data));
+                    break;
+                case Data_encoding_t::FLOAT :
+                    /*snprintf(&(value_buffer[0]), value_str_buffer_size, "%0.2f", (std::bit_cast<float>(measurement.data)));*/
+                    break;
+                default:
+                    snprintf(&(value_buffer[0]), value_str_buffer_size, "None");
+                    break;
+            }
+
+            snprintf(keyval_buffer, 50, "\"%s\":%s,", sensor_type.tag, &value_buffer[0]);
+            return;
         }
 };
 
@@ -195,7 +278,7 @@ class Timestamped_measurement_storage{
 
     public:
         static constexpr time_t Undefined_base_timestamp{0xFFFFFFFF};
-        static constexpr uint16_t numof_measurement_slots{100};
+        static constexpr uint16_t numof_measurement_slots{40}; /*100*/
         inline static time_t base_timestamp{Undefined_base_timestamp};
         inline static Timestamped_measurement tm_measurement_list[numof_measurement_slots];
 
@@ -277,54 +360,63 @@ class Timestamped_measurement_storage{
             /* group into bins, new, middle, old */
 
             std::sort(std::begin(tm_measurement_list), std::end(tm_measurement_list),[](const Timestamped_measurement& meas1, const Timestamped_measurement& meas2) {
-
                 if(meas1.measurement_metadata.measurement_type == meas2.measurement_metadata.measurement_type){
                     return meas1.measurement_metadata.time_offset_secs < meas2.measurement_metadata.time_offset_secs;
                 }
-                
                 return meas1.measurement_metadata.measurement_type < meas2.measurement_metadata.measurement_type;
             });
 
-            const uint16_t target_delete = 2;
             uint16_t numof_freed_slots = 0;
-            for(Measurement_entity_type measurement_type : measurement_types){
+            for(Measurement_entity_type& measurement_type : measurement_types)
+            {
+                /* We have selected a measurement type to work with*/
 
-                uint16_t delete_counter = 0;
-
-                std::for_each(std::begin(tm_measurement_list), std::end(tm_measurement_list),[&](Timestamped_measurement& meas){
-
-                    if((meas.measurement_metadata.is_initialized == 0u && meas.measurement_metadata.measurement_type != Measurement_type::SLOT_FREE) || meas.measurement_metadata.measurement_type == Measurement_type::ERROR){
-                        meas.measurement_metadata.measurement_type = Measurement_type::SLOT_FREE;
-                        numof_freed_slots++;
-                        return;
+                /* Now count the number of objects of this type */
+                uint16_t numof_type_measurement = std::count_if(std::begin(tm_measurement_list), std::end(tm_measurement_list), [&](Timestamped_measurement& measurement){ 
+                    if(measurement.measurement_metadata.measurement_type <= Measurement_type::SLOT_FREE){
+                        /* Either free or error, do not count */
+                        return false;
                     }
 
-                    /* Error or non initialized can be reused.*/
-                    if(meas.measurement_metadata.measurement_type == Measurement_type::SLOT_FREE || meas.measurement_metadata.measurement_type != measurement_type.measurement_type){
-                        return;
+                     return measurement.measurement_metadata.measurement_type == measurement_type.measurement_type; 
+                });
+
+                ESP_LOGI("TM_MEAS","Compactor pruning: %s, numof measurements: %ld", measurement_type.tag, numof_type_measurement);
+
+                uint16_t measurement_series_index = 0;
+                uint16_t subdivision_counter = 0;
+                for(Timestamped_measurement& selected_measurement : tm_measurement_list){
+
+                    /* check if type matches (at the same time this will make sure slot is not free or error)*/
+                    if(selected_measurement.measurement_metadata.measurement_type != measurement_type.measurement_type){
+                        continue;
                     }
 
-                    if(meas.measurement_metadata.is_initialized == 0u || meas.measurement_metadata.measurement_type == Measurement_type::ERROR){
-                        meas.measurement_metadata.measurement_type = Measurement_type::SLOT_FREE;
-                        numof_freed_slots++;
-                        return;
+                    if(measurement_series_index <= (0.33 * numof_type_measurement)){
+                        if(subdivision_counter == 2){
+                            selected_measurement.clear_slot();
+                            numof_freed_slots++;
+                        }
                     }
-
-
-                    if(delete_counter >= target_delete)
-                    {
-                        meas.measurement_metadata.measurement_type = Measurement_type::SLOT_FREE;
-                        numof_freed_slots++;
-                        delete_counter = 0;
+                    else if(measurement_series_index <= (0.66 * numof_type_measurement)){
+                        if(subdivision_counter == 0 || subdivision_counter == 2){
+                            selected_measurement.clear_slot();
+                            numof_freed_slots++;
+                        }
                     }
                     else
                     {
-                        delete_counter++;
+                        if(subdivision_counter == 0 || subdivision_counter == 1 || subdivision_counter == 2){
+                            selected_measurement.clear_slot();
+                            numof_freed_slots++;
+                        }
                     }
-                });
-                
-                
+
+                    measurement_series_index++;
+                    subdivision_counter = (subdivision_counter + 1) % 4;
+                }
             }
+
             ESP_LOGI("TM_MEAS","Compactor finished. Additional %ld slot were emptied.", numof_freed_slots);
 
             return ESP_OK;
@@ -379,6 +471,8 @@ class Timestamped_measurement_storage{
     
         inline void print_measurements(void) {
 
+            auto [mcu_time_unix, time_reliability, now_tm] = Ntp_time::evaluate_mcu_rtc(true);
+
             std::sort(std::begin(tm_measurement_list), std::end(tm_measurement_list),[](const Timestamped_measurement& meas1, const Timestamped_measurement& meas2) {
 
                 if(meas1.measurement_metadata.measurement_type == meas2.measurement_metadata.measurement_type){
@@ -409,7 +503,7 @@ class Timestamped_measurement_storage{
                         return type.measurement_type == measurement.measurement_metadata.measurement_type;
                     });
                     if(entity_type != std::end(measurement_types)){
-                        measurement.print(base_timestamp);
+                        measurement.print(base_timestamp, mcu_time_unix);
                     }
                 });
             }
@@ -441,25 +535,25 @@ class Timestamped_measurement_storage{
 
                 if((measurement.measurement_metadata.time_offset_secs >= offset_min) && (measurement.measurement_metadata.time_offset_secs <= offset_max))
                 {
-                    switch(measurement.measurement_metadata.weblog_status){
+                    switch(measurement.measurement_metadata.log_status){
                         case Log_status_t::RDY_TO_SEND:
                             numof_marked++;
                             break;
                         case Log_status_t::UNPROCESSED:
-                            measurement.measurement_metadata.weblog_status = Log_status_t::RDY_TO_SEND;
+                            measurement.measurement_metadata.log_status = Log_status_t::RDY_TO_SEND;
                             numof_marked++;
                             break;
                         case Log_status_t::SEND_FAIL:
-                            measurement.measurement_metadata.weblog_status = Log_status_t::RDY_TO_SEND;
+                            measurement.measurement_metadata.log_status = Log_status_t::RDY_TO_SEND;
                             numof_marked++;
                             break;
                         default:
                             continue;
                     }   
                 }
-                else if(measurement.measurement_metadata.weblog_status == Log_status_t::RDY_TO_SEND)
+                else if(measurement.measurement_metadata.log_status == Log_status_t::RDY_TO_SEND)
                 {
-                    measurement.measurement_metadata.weblog_status = Log_status_t::UNPROCESSED;
+                    measurement.measurement_metadata.log_status = Log_status_t::UNPROCESSED;
                 }
             }
             //ESP_LOGI("","Requested a max of %ld measurements in the period of %ld and %ld to be sent, marked %ld/%ld to be sent.",offset_min, offset_max);
@@ -471,57 +565,42 @@ class Timestamped_measurement_storage{
         /* This is for web transfer as part of JSON object, @TODO: make something similar for logging to SD card. */
         esp_err_t get_servicedata_from_marked_measurements() /* char (&transport_buffer)[20]*/
         {
-            //char construct_buffer[20] = {0};
-            //char* construct_buffer_end = construct_buffer;
-
-            constexpr uint16_t values_str_size{20};
+            constexpr uint16_t values_str_size{50};
             char value_str_buffer[values_str_size] = {};
 
-            constexpr uint16_t tag_str_size{20};
-            char tag_str_buffer[tag_str_size] = {};
+            constexpr uint16_t service_data_str_size{values_str_size*5};
+            char service_data_str[service_data_str_size] = {};
 
-            //char key_value_str_buffer[20] = {0};
-
-            /* set a timestamp for all measurements */
-            /* loop over tm_measurement list and get all measurements that are marked */
-            /* get the name of each measurement */
-            /* get the value and correct format of each measurement */
-            /* replace the value with None in case of measurement error */
+            uint8_t in_buffer = 0;
+            uint8_t remaining = 0;
 
             for(Timestamped_measurement& measurement : tm_measurement_list){
 
                 /* clear value string buffer */
                 std::fill(value_str_buffer, (value_str_buffer + values_str_size), '\0');
 
+                if(measurement.measurement_metadata.log_status == Log_status_t::RDY_TO_SEND ||
+                    measurement.measurement_metadata.log_status == Log_status_t::IN_PROGRESS ||
+                    measurement.measurement_metadata.log_status == Log_status_t::SEND_RETRY){
 
-                if(measurement.measurement_metadata.weblog_status == Log_status_t::RDY_TO_SEND){
-
-                    /* TODO: as per the HA implementation, None value is treated as a measurement error, so pass a None string as a value if there was some kind of out of range or out of bounds, but this can be changed, and aligned with the HA backend to log sensor errors there */
-                    /* fill in the value string */
-                    Data_encoding_t encoding = Timestamped_measurement_storage::get_encoding(measurement.measurement_metadata.measurement_type);
-                    switch (encoding)
-                    {
-                    case Data_encoding_t::BINARY :
-                        snprintf(value_str_buffer, values_str_size, "%d", measurement.data == 0u ? 0 : 1);
-                        break;
-                    case Data_encoding_t::UINT :
-                        snprintf(value_str_buffer, values_str_size, "%ld", static_cast<uint32_t>(measurement.data));
-                        break;
-                    case Data_encoding_t::INT :
-                        snprintf(value_str_buffer, values_str_size, "%ld", static_cast<int32_t>(measurement.data));
-                        break;
-                    case Data_encoding_t::FLOAT :
-                        snprintf(value_str_buffer, values_str_size, "%0.2f", std::bit_cast<float>(measurement.data));
-                        break;
-                    default:
+                    if(strlen(service_data_str) < (service_data_str_size - values_str_size)){
+                        /* Add new service data */
+                        measurement.get_service_data_keyval(value_str_buffer);
+                        ESP_LOGI("KEYVALUE:","%s",value_str_buffer);
+                        strncat(service_data_str, value_str_buffer, 50);
+                        in_buffer++;
+                        measurement.measurement_metadata.log_status = Log_status_t::IN_PROGRESS;
+                    }
+                    else{
+                        remaining++;
                         break;
                     }
                 }
-
-                Timestamped_measurement_storage::get_tag_label(measurement.measurement_metadata.measurement_type, tag_str_buffer);
-
-                ESP_LOGI("KEYVALUE:","\"%s\"=%s",tag_str_buffer,value_str_buffer);
             }
+
+            ESP_LOGI("SERVICE_DATA:","%d ready to send, %d remaining.",in_buffer, remaining);
+            ESP_LOGI("SERVICE_DATA:","%s",service_data_str);
+
             return ESP_OK;
         }
 };

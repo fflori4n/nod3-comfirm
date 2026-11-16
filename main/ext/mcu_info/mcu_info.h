@@ -208,8 +208,6 @@ public:
         ESP_LOGI(log_label,"silicon revision v%d.%d, ", major_rev, minor_rev); 
         ESP_LOGI(log_label,"Minimum heap size since wake up: %" PRIu32 " bytes\n", esp_get_minimum_free_heap_size()); 
 
-       /* ESP_LOGI(log_label,"MAC: %s", wifiIF.getMACAddressCStr()); */
-
     }
 
     std::string get_mac_string(wifi_interface_t type_of_mac, uint8_t number_of_bytes = 6, char spacer = ':'){

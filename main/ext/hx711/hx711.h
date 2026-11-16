@@ -174,26 +174,26 @@ void set_scale(float calib_measured_value_g, float real_value_g, float tare_offs
  /* The same function as get service data basically, but it uses report builder to check bounds and check for other errors. */
     esp_err_t get_service_data_report(char* text_buffer, int16_t text_buffer_size){
 
-        Report_builder report;
-        report.add_float_report_item("weight_g", (float)(this->filtered_weight_g), -200.0f, 100000.0f);
-        report.add_float_report_item("wvar_g", (float)(this->measurement_variance_g), 0.0f, 50.0f);
+        // Report_builder report;
+        // report.add_float_report_item("weight_g", (float)(this->filtered_weight_g), -200.0f, 100000.0f);
+        // report.add_float_report_item("wvar_g", (float)(this->measurement_variance_g), 0.0f, 50.0f);
 
-        int16_t res = snprintf(text_buffer, text_buffer_size, "%s", report.get_service_data_buffer().c_str());
+        // int16_t res = snprintf(text_buffer, text_buffer_size, "%s", report.get_service_data_buffer().c_str());
 
-        if ((res < 0) || (res >= text_buffer_size))
-        {
-            return ESP_FAIL;
-        }
+        // if ((res < 0) || (res >= text_buffer_size))
+        // {
+        //     return ESP_FAIL;
+        // }
         return ESP_OK;
     }
 
-    esp_err_t add_to_report(Report_builder& report_buildr){
+    // esp_err_t add_to_report(Report_builder& report_buildr){
 
-        report_buildr.add_keyval(Report_group_e::SENSOR_HIVE_WEIGHT, "weight_g", (void*)&(this->filtered_weight_g), Type_e::FLOAT32, {-200.0f, 100000.0f});
-        report_buildr.add_keyval(Report_group_e::SENSOR_HIVE_WEIGHT, "wvar_g", (void*)&(this->measurement_variance_g), Type_e::FLOAT32, {-40.0f, 50.0f});
+    //     report_buildr.add_keyval(Report_group_e::SENSOR_HIVE_WEIGHT, "weight_g", (void*)&(this->filtered_weight_g), Type_e::FLOAT32, {-200.0f, 100000.0f});
+    //     report_buildr.add_keyval(Report_group_e::SENSOR_HIVE_WEIGHT, "wvar_g", (void*)&(this->measurement_variance_g), Type_e::FLOAT32, {-40.0f, 50.0f});
         
-        return ESP_OK;
-    }
+    //     return ESP_OK;
+    // }
 };
 
 HX711 hive_scale;

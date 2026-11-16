@@ -436,18 +436,18 @@ public:
     /* The same function as get service data basically, but it uses report builder to check bounds and check for other errors. */
     esp_err_t get_service_data_report(char *text_buffer, int16_t text_buffer_size){
 
-        Report_builder report;
+        // Report_builder report;
 
-        report.add_float_report_item("ccs811_eco2", (float)(this->eco2_ppm), 399.0f, 32768.0f);
-        report.add_float_report_item("ccs811_tvoc", (float)(this->total_voc_ppb), 0.0f, 32768.0f);
-        report.add_uint_report_item("ccs811_base",(this->raw_baseline), 10000.0f, 6500000.0f);
+        // report.add_float_report_item("ccs811_eco2", (float)(this->eco2_ppm), 399.0f, 32768.0f);
+        // report.add_float_report_item("ccs811_tvoc", (float)(this->total_voc_ppb), 0.0f, 32768.0f);
+        // report.add_uint_report_item("ccs811_base",(this->raw_baseline), 10000.0f, 6500000.0f);
        
-        int16_t res = snprintf(text_buffer, text_buffer_size, "%s", report.get_service_data_buffer().c_str());
+        // int16_t res = snprintf(text_buffer, text_buffer_size, "%s", report.get_service_data_buffer().c_str());
 
-        if ((res < 0) || (res >= text_buffer_size))
-        {
-            return ESP_FAIL;
-        }
+        // if ((res < 0) || (res >= text_buffer_size))
+        // {
+        //     return ESP_FAIL;
+        // }
         return ESP_OK;
 
     }

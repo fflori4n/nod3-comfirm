@@ -111,35 +111,35 @@ namespace DS18B20 {
      /* The same function as get service data basically, but it uses report builder to check bounds and check for other errors. */
     esp_err_t get_service_data_report(char* text_buffer, int16_t text_buffer_size){
 
-        Report_builder report;
+        // Report_builder report;
 
-        report.add_float_report_item("ds_pcb", (float)get_last_measurement(ds18temp_addr_pcb), -40.0f, 250.0f);
-        report.add_float_report_item("ds_scale", (float)get_last_measurement(ds18temp_addr_scale), -40.0f, 250.0f);
+        // report.add_float_report_item("ds_pcb", (float)get_last_measurement(ds18temp_addr_pcb), -40.0f, 250.0f);
+        // report.add_float_report_item("ds_scale", (float)get_last_measurement(ds18temp_addr_scale), -40.0f, 250.0f);
 
 
-        int16_t res = snprintf(text_buffer, text_buffer_size, "%s", report.get_service_data_buffer().c_str());
+        // int16_t res = snprintf(text_buffer, text_buffer_size, "%s", report.get_service_data_buffer().c_str());
 
         
         
-        //test_report.dbg_print_vector();
+        // //test_report.dbg_print_vector();
 
-        if ((res < 0) || (res >= text_buffer_size))
-        {
-            return ESP_FAIL;
-        }
+        // if ((res < 0) || (res >= text_buffer_size))
+        // {
+        //     return ESP_FAIL;
+        // }
         return ESP_OK;
 
     }
 
-    esp_err_t add_to_report(Report_builder& report_buildr)
-    {
-        ds18_onboard_last_measurement = get_last_measurement(ds18temp_addr_pcb);
-        ds18_scale_last_measurement = get_last_measurement(ds18temp_addr_scale);
+    // esp_err_t add_to_report(Report_builder& report_buildr)
+    // {
+    //     ds18_onboard_last_measurement = get_last_measurement(ds18temp_addr_pcb);
+    //     ds18_scale_last_measurement = get_last_measurement(ds18temp_addr_scale);
 
-        report_buildr.add_keyval(Report_group_e::DEV_INFO, "ds_pcb", (void*)&ds18_onboard_last_measurement,Type_e::FLOAT32, {-40.0f, 250.0f});
-        report_buildr.add_keyval(Report_group_e::SENSOR_HIVE_WEIGHT, "ds_scale", (void*)&ds18_scale_last_measurement,Type_e::FLOAT32, {-40.0f, 250.0f});
+    //     report_buildr.add_keyval(Report_group_e::DEV_INFO, "ds_pcb", (void*)&ds18_onboard_last_measurement,Type_e::FLOAT32, {-40.0f, 250.0f});
+    //     report_buildr.add_keyval(Report_group_e::SENSOR_HIVE_WEIGHT, "ds_scale", (void*)&ds18_scale_last_measurement,Type_e::FLOAT32, {-40.0f, 250.0f});
     
-        return ESP_OK;
-    }
+    //     return ESP_OK;
+    // }
 };
         

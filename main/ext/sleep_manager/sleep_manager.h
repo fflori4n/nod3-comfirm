@@ -1,4 +1,5 @@
-/* #include "esp_sleep.h" */
+#ifndef SLEEP_MAN_H
+#define SLEEP_MAN_H
 
 #include <cstdint>
 #include <esp_err.h>
@@ -96,8 +97,8 @@ class Sleep_manager{
 
     void enter_deep_sleep(void) { 
 
-        /* TODO: Disconnect wifi*/
-        wlan_interface.disconnect_power_off();
+        /* TODO: Disconnect wifi AND wait for it to disconnect.*/
+        wlan_interface.set_wlan_state(NETWORK::Wlan::wlan_state_t::STA_REQUEST_DISCONNECT);
         
         /* TODO: check wakeup sources are enabled correctly*/
         /* TODO: check that sleep is scheduled for longer time than minimum */
@@ -150,3 +151,5 @@ class Sleep_manager{
     }
 
 };
+
+#endif /* SLEEP_MAN_H */

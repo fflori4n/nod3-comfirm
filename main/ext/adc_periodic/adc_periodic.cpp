@@ -217,11 +217,6 @@ void task_adc_continous_measurement(void *parameters)
 {
     ADC_continous::adc_driver_task = xTaskGetCurrentTaskHandle();
 
-    // while(ESP_OK != wlan_interface.is_connected())
-    // {
-    //     vTaskDelay(500 / portTICK_PERIOD_MS);
-    // }
-
     continous_adc_manager.init_and_start();
 
     uint16_t reset_num = 0;
@@ -274,7 +269,7 @@ void task_adc_continous_measurement(void *parameters)
 
                 /* Just trust me bro this cast is ok. just.. trust me. I know. */
                 sample_buff_read_result = adc_continuous_read(ADC_continous::adc_continous_driver_handle, (uint8_t *)(void *)ADC_continous::adc_continous_sample_buffer, (ADC_continous::continous_conversion_buffer_size / SOC_ADC_DIGI_DATA_BYTES_PER_CONV), &num_of_samples_returned, 10000);
-                // ESP_LOGW("ADC", "samp:%d", num_of_samples_returned);
+                /*ESP_LOGW("ADC", "samp:%d", num_of_samples_returned);*/
                 if (sample_buff_read_result == ESP_OK)
                 {
 
@@ -323,7 +318,7 @@ void task_adc_continous_measurement(void *parameters)
                         {
                             adc_ch.new_sample = (adc_ch.raw_adc);
                             // adc_ch.filtered_dc_base = ADC_continous::weighted_exp_filter((adc_ch.new_sample), adc_ch.filtered_dc_base, (filt_param_200ms / adc_ch.num_of_adc_multisamples), 0.0f);
-                            Microphone_input::capture_buffer_insert((adc_ch.raw_adc / ADC_continous::intermediate_scaling_factor), sample_index);
+                            //Microphone_input::capture_buffer_insert((adc_ch.raw_adc / ADC_continous::intermediate_scaling_factor), sample_index);
                             adc_ch.cb_isr_duration_us = esp_timer_get_time() - channel_processing_start;
                             adc_ch.measurement_rdy = true;
                         }

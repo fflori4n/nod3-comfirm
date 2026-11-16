@@ -26,7 +26,10 @@
                     "${config:idf.espIdfPathWin}/components",
                     "${workspaceFolder}"
                 ]
-            }
+            },
+            "compileCommands": [
+                "${workspaceFolder}/build/compile_commands.json"
+            ]
         }
     ],
     "version": 4

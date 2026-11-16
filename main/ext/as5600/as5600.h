@@ -361,82 +361,82 @@ public:
     /* The same function as get service data basically, but it uses report builder to check bounds and check for other errors. */
     esp_err_t get_service_data_report(char *text_buffer, int16_t text_buffer_size, float lrpm, uint32_t pulse_count){
 
-        Report_builder report;
+        // Report_builder report;
 
-        report.add_uint_report_item("wvane_sts", (uint32_t)mag_status, 0, 0xFF);
-        report.add_uint_report_item("wvane_gain", (uint32_t)gain_ctrl, 0, 0xFF);
-        report.add_uint_report_item("wvane_mag", (uint32_t)hall_magnitude, 0, 0xFFFF);
-        report.add_uint_report_item("wvane_raw", (uint32_t)raw_reading, 0, 4096u);
+        // report.add_uint_report_item("wvane_sts", (uint32_t)mag_status, 0, 0xFF);
+        // report.add_uint_report_item("wvane_gain", (uint32_t)gain_ctrl, 0, 0xFF);
+        // report.add_uint_report_item("wvane_mag", (uint32_t)hall_magnitude, 0, 0xFFFF);
+        // report.add_uint_report_item("wvane_raw", (uint32_t)raw_reading, 0, 4096u);
 
-        report.add_float_report_item("wvane_degc", (float)(degrees), 0.0f, 360.0f);
-        report.add_float_report_item("wanemo_lrpm", (float)(lrpm), 0.0f, 10000.0f);
-        /*report.add_float_report_item("wanemo_hrpm", (float)(hrpm), 0.0f, 10000.0f);*/
-        report.add_float_report_item("wanemo_edge", (float)(pulse_count), 0.0f, 0xFFFFFFFF);
+        // report.add_float_report_item("wvane_degc", (float)(degrees), 0.0f, 360.0f);
+        // report.add_float_report_item("wanemo_lrpm", (float)(lrpm), 0.0f, 10000.0f);
+        // /*report.add_float_report_item("wanemo_hrpm", (float)(hrpm), 0.0f, 10000.0f);*/
+        // report.add_float_report_item("wanemo_edge", (float)(pulse_count), 0.0f, 0xFFFFFFFF);
 
-        int16_t res = snprintf(text_buffer, text_buffer_size, "%s", report.get_service_data_buffer().c_str());
+        // int16_t res = snprintf(text_buffer, text_buffer_size, "%s", report.get_service_data_buffer().c_str());
 
-        if ((res < 0) || (res >= text_buffer_size))
-        {
-            return ESP_FAIL;
-        }
+        // if ((res < 0) || (res >= text_buffer_size))
+        // {
+        //     return ESP_FAIL;
+        // }
         return ESP_OK;
 
     }
 
-    esp_err_t add_to_report(Report_builder &report_buildr, uint8_t lrpm)
-    {
+    // esp_err_t add_to_report(Report_builder &report_buildr, uint8_t lrpm)
+    // {
 
-        report_buildr.add_keyval(Report_builder::tag_value_t{
-            .type = Type_e::INT32,
-            .key = "wvane_sts",
-            .value = (void*)&(mag_status),
-            .group = Report_group_e::SENSOR_BMX
-        },{0, 0xFF});
+    //     report_buildr.add_keyval(Report_builder::tag_value_t{
+    //         .type = Type_e::INT32,
+    //         .key = "wvane_sts",
+    //         .value = (void*)&(mag_status),
+    //         .group = Report_group_e::SENSOR_BMX
+    //     },{0, 0xFF});
 
-        report_buildr.add_keyval(Report_builder::tag_value_t{
-            .type = Type_e::INT32,
-            .key = "wvane_gain",
-            .value = (void*)&(gain_ctrl),
-            .group = Report_group_e::SENSOR_BMX
-        },{0, 0xFF});
+    //     report_buildr.add_keyval(Report_builder::tag_value_t{
+    //         .type = Type_e::INT32,
+    //         .key = "wvane_gain",
+    //         .value = (void*)&(gain_ctrl),
+    //         .group = Report_group_e::SENSOR_BMX
+    //     },{0, 0xFF});
 
-        report_buildr.add_keyval(Report_builder::tag_value_t{
-            .type = Type_e::INT32,
-            .key = "wvane_mag",
-            .value = (void*)&(hall_magnitude),
-            .group = Report_group_e::SENSOR_BMX
-        },{0, 0xFFFF});
+    //     report_buildr.add_keyval(Report_builder::tag_value_t{
+    //         .type = Type_e::INT32,
+    //         .key = "wvane_mag",
+    //         .value = (void*)&(hall_magnitude),
+    //         .group = Report_group_e::SENSOR_BMX
+    //     },{0, 0xFFFF});
 
-        report_buildr.add_keyval(Report_builder::tag_value_t{
-            .type = Type_e::INT32,
-            .key = "wvane_raw",
-            .value = (void*)&(raw_reading),
-            .group = Report_group_e::SENSOR_BMX
-        },{0, 4096u});
+    //     report_buildr.add_keyval(Report_builder::tag_value_t{
+    //         .type = Type_e::INT32,
+    //         .key = "wvane_raw",
+    //         .value = (void*)&(raw_reading),
+    //         .group = Report_group_e::SENSOR_BMX
+    //     },{0, 4096u});
 
-        report_buildr.add_keyval(Report_builder::tag_value_t{
-            .type = Type_e::FLOAT32,
-            .key = "wvane_degc",
-            .value = (void*)&(degrees),
-            .group = Report_group_e::SENSOR_BMX
-        },{0, 4096u});
+    //     report_buildr.add_keyval(Report_builder::tag_value_t{
+    //         .type = Type_e::FLOAT32,
+    //         .key = "wvane_degc",
+    //         .value = (void*)&(degrees),
+    //         .group = Report_group_e::SENSOR_BMX
+    //     },{0, 4096u});
 
-        report_buildr.add_keyval(Report_builder::tag_value_t{
-            .type = Type_e::FLOAT32,
-            .key = "wanemo_lrpm",
-            .value = (void*)&(lrpm),
-            .group = Report_group_e::SENSOR_BMX
-        },{0.0f, 10000.0f});
+    //     report_buildr.add_keyval(Report_builder::tag_value_t{
+    //         .type = Type_e::FLOAT32,
+    //         .key = "wanemo_lrpm",
+    //         .value = (void*)&(lrpm),
+    //         .group = Report_group_e::SENSOR_BMX
+    //     },{0.0f, 10000.0f});
 
-        report_buildr.add_keyval(Report_builder::tag_value_t{
-            .type = Type_e::FLOAT32,
-            .key = "wanemo_edge",
-            .value = (void*)&(pulse_count),
-            .group = Report_group_e::SENSOR_BMX
-        },{0.0f, 0xFFFFFFFF});
+    //     report_buildr.add_keyval(Report_builder::tag_value_t{
+    //         .type = Type_e::FLOAT32,
+    //         .key = "wanemo_edge",
+    //         .value = (void*)&(pulse_count),
+    //         .group = Report_group_e::SENSOR_BMX
+    //     },{0.0f, 0xFFFFFFFF});
         
-        return ESP_OK;
-    }
+    //     return ESP_OK;
+    // }
 };
 
 #endif /* LIB_AS5600_H */
