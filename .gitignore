@@ -37,3 +37,4 @@ bin/*
 build/*
 
 network_credentials.h
+websoc_credentials.h

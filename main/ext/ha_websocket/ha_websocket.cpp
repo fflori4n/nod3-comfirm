@@ -25,13 +25,13 @@ void Homeassistant_websocket::event_handler(void *handler_args, esp_event_base_t
    /*ESP_LOGI(ha_websoc_log_tag, "EVENT_DATA");*/
 
     uint32_t data_cpy_len = data->data_len;
-    if(data_cpy_len > txrx_buffer_size){
-      data_cpy_len = txrx_buffer_size;
+    if(data_cpy_len > request_txrxbuffer_len){
+      data_cpy_len = request_txrxbuffer_len;
     }
     
     websoc_rx_data.op_code = data->op_code;
     websoc_rx_data.data_len = data->data_len;
-    memset(websoc_rx_data.rx_buffer, '\0', txrx_buffer_size);
+    memset(websoc_rx_data.rx_buffer, '\0', request_txrxbuffer_len);
     snprintf(websoc_rx_data.rx_buffer, data_cpy_len, (char *)data->data_ptr);
     websoc_rx_data.processed = false;
     }
@@ -127,8 +127,8 @@ esp_err_t Homeassistant_websocket::connect(void)
   if (websoc_status_t::websoc_sts_attempting_connect == socket_status)
   {
 
-    const constexpr uint16_t connection_attempt_timeout_ms{500};
-    const constexpr uint16_t connection_attempt_pause{50 / portTICK_PERIOD_MS};
+    constexpr uint16_t connection_attempt_timeout_ms{500};
+    constexpr uint16_t connection_attempt_pause{50 / portTICK_PERIOD_MS};
 
     uint16_t i = 0;
     for (i = 0; ((i < (connection_attempt_timeout_ms / connection_attempt_pause)) && (!esp_websocket_client_is_connected(websoc_client_handle))); i++)
@@ -169,28 +169,27 @@ esp_err_t Homeassistant_websocket::disconnect(void){
     return res;
   }
 
-  esp_err_t Homeassistant_websocket::connectAndAuthSocket(uint8_t numberOfRetries = 10, uint16_t pauseBetweenRetries = 1500)
+esp_err_t Homeassistant_websocket::connectAndAuthSocket(uint8_t numberOfRetries = 10, uint16_t pauseBetweenRetries = 1500)
   {
-
     esp_err_t res = ESP_OK;
-
-    if(ESP_OK != wlan_interface.is_connected())
-    {
-      return ESP_ERR_WIFI_BASE;
-    }
 
     if (websoc_status_t::websoc_sts_not_initialized == socket_status)
     {
-      res = init();
+      res = this->init();
       if (ESP_OK != res)
       {
         return res;
       }
     }
 
+    if(ESP_OK != wlan_interface.is_sta_connected())
+    {
+      return ESP_ERR_WIFI_BASE;
+    }
+
     if ((websoc_status_t::websoc_sts_connected != socket_status) && (socket_status >= websoc_status_t::websoc_sts_not_connected))
     {
-      res = connect();
+      res = this->connect();
       if (ESP_OK != res)
       {
         return res;
@@ -200,35 +199,57 @@ esp_err_t Homeassistant_websocket::disconnect(void){
     if ((websoc_status_t::websoc_sts_connected_authed != socket_status) && (socket_status >= websoc_status_t::websoc_sts_connected))
     {
 
-      for (uint16_t i = 0; ((websoc_status_t::websoc_sts_connected == socket_status) && (i < numberOfRetries)); i++)
+      for (uint16_t i = 0; i < numberOfRetries; i++)
       {
+        if (socket_status != websoc_status_t::websoc_sts_connected) {
+            break;
+        }
 
-        (void)waitForResponse("auth_required", NULL, 500); /* sometimes HA server will send welcome messege, ignore.*/
+        /* Workaround to skip first response, sometimes HA server will send welcome messege, ignore.*/
+        (void)waitForResponse("auth_required", nullptr, 500); 
 
-        memset(rxtx_buffer, '\0', txrx_buffer_size);
-        uint16_t len = snprintf(rxtx_buffer, txrx_buffer_size, ha_websoc_auth_template, ha_websoc_token); /* move websoc out template with token into buff*/
-        /*ESP_LOGI(ha_websoc_log_tag, "sending: %s", rxtx_buffer);*/
-        websoc_rx_data.processed = true;
-        int8_t result = esp_websocket_client_send_text(websoc_client_handle, rxtx_buffer, len, portMAX_DELAY);
-        if (-1 == result)
+        /* Prepare the auth request payload and put it into rxtx buff */
+        //memset(rxtx_buffer, '\0', request_txrxbuffer_len);
+        const uint16_t len = snprintf(rxtx_buffer, request_txrxbuffer_len, ha_websoc_auth_template, ha_websoc_token); /* move websoc out template with token into buff*/
+        if (len < 0 || static_cast<size_t>(len) >= request_txrxbuffer_len)  /* TODO: move check inside send_text*/
         {
-          /* send failed, check what is the cause:*/
-          /* check if disconnected */
-          if (false == esp_websocket_client_is_connected(websoc_client_handle))
+          ESP_LOGE(ha_websoc_log_tag, "Authentication copy to buff failed");
+          return ESP_ERR_INVALID_SIZE;
+        }
+
+        /* Send data from rxtx buff*/
+        websoc_rx_data.processed = true;
+        const int8_t result = esp_websocket_client_send_text(websoc_client_handle, rxtx_buffer, len, portMAX_DELAY);
+        ESP_LOGI(ha_websoc_log_tag, "TX:[%-12s |%4d/%4d bytes]\nl-<-:\x1b[0m%s\x1b[32m:-", op_code_dbg(1), result, strlen(rxtx_buffer), rxtx_buffer);
+
+        if (result < 0)
+        {
+          ESP_LOGW(ha_websoc_log_tag, "Failed to send authentication message");
+
+          if (!esp_websocket_client_is_connected(websoc_client_handle))
           {
             socket_status = websoc_status_t::websoc_sts_not_connected;
+            break;
           }
-        }
-        else{
-          ESP_LOGI(ha_websoc_log_tag, "TX:[%-12s |%4d/%4d bytes]\nl-<-:\x1b[0m%s\x1b[32m:-", op_code_dbg(1), result, strlen(rxtx_buffer), rxtx_buffer);
+
+          if (i + 1 < numberOfRetries)
+          {
+            vTaskDelay(pdMS_TO_TICKS(pauseBetweenRetries));
+          }
+          continue;
         }
 
         if (ESP_OK == waitForResponse("auth_ok", "\"success\":false", 2000))
         {
           socket_status = websoc_status_t::websoc_sts_connected_authed;
           request_id = 1;
+          break;
         }
-      }
+
+        if (socket_status == websoc_status_t::websoc_sts_connected_authed) {
+            break;
+        }
+      } 
 
       if (websoc_status_t::websoc_sts_connected_authed != socket_status)
       {
@@ -268,7 +289,7 @@ esp_err_t Homeassistant_websocket::disconnect(void){
 
             for (uint16_t i = 0; (i < (wait_timeout_ms / network_CTS_poll_ms)); i++)
             {
-              if(true == wlan_interface.network_ready())
+              if(true == wlan_interface.is_sta_connected())
               {
                 res = ESP_OK;
                 break;
@@ -286,9 +307,9 @@ esp_err_t Homeassistant_websocket::disconnect(void){
           }
 
           /* construct the frame */
-          memset(rxtx_buffer, '\0', txrx_buffer_size);
+          memset(rxtx_buffer, '\0', request_txrxbuffer_len);
           /* TODO: check if str has %d and only one %d to add request id + check if text is longer than what buffer can accept*/
-          uint16_t len = snprintf(rxtx_buffer, txrx_buffer_size, tx_text, request_id);
+          uint16_t len = snprintf(rxtx_buffer, request_txrxbuffer_len, tx_text, request_id);
           request_id++;
           /*ESP_LOGI(ha_websoc_log_tag, "READY TO SEND: %d bytes: %s",strlen(rxtx_buffer), rxtx_buffer);*/
 
@@ -328,8 +349,8 @@ esp_err_t Homeassistant_websocket::disconnect(void){
       for (uint16_t i = 0; ((res != ESP_OK) && (i < numberOfRetries)); i++)
       {
 
-        memset(rxtx_buffer, '\0', txrx_buffer_size);
-        uint16_t len = snprintf(rxtx_buffer, txrx_buffer_size, ha_websoc_ping_template, request_id);
+        memset(rxtx_buffer, '\0', request_txrxbuffer_len);
+        uint16_t len = snprintf(rxtx_buffer, request_txrxbuffer_len, ha_websoc_ping_template, request_id);
         request_id++;
 
         ESP_LOGI(ha_websoc_log_tag, "sending: %s", rxtx_buffer);

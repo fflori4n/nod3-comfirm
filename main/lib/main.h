@@ -51,6 +51,8 @@ enum class Type_e : const uint8_t
 //#include "freertos/heap_caps.h"
 #include <array>
 #include <string>
+#include <inttypes.h>
+
 
 /* this is important for ADC continous */
 #define CONFIG_ADC_CONTINUOUS_ISR_IRAM_SAFE 1
@@ -71,6 +73,8 @@ enum class Type_e : const uint8_t
 #include "esp_debug_helpers.h"
 #include "soc/soc_memory_layout.h"
 /*#include "esp_flash.h"*/
+#include "esp_timer.h"
+#include "esp_private/esp_clk.h"
 #include "esp_debug_helpers.h"
 #include "nvs_flash.h"
 #include "esp_wifi_types.h"
@@ -82,6 +86,7 @@ enum class Type_e : const uint8_t
 #include "esp_adc/adc_continuous.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_http_server.h"
+#include "esp_adc/adc_oneshot.h"
 
 #include "driver/temperature_sensor.h"
 
@@ -96,26 +101,35 @@ enum class Type_e : const uint8_t
 #include "driver/i2c_master.h"
 #include <cmath>
 
-#include "report_builder/report_builder.h"
+constexpr const char* main_tag{COLOR_GRAY "MAIN" COLOR_WHITE};
+constexpr const char* sys_up_tag{COLOR_GRAY "SYS-UP" COLOR_WHITE};
+constexpr const char* usr_cfg_tag{COLOR_GRAY "USR_CFG" COLOR_WHITE};
+constexpr const char* i2c_tag{COLOR_GRAY "I2C" COLOR_WHITE};
+
+
+
+//#include "report_builder/report_builder.h"
 #include "nvs_manager/nvs_manager.h"
 #include "ntp_time/ntp_time.cpp"
 #include "http_server/http_server.h"
 #include "network_manager/network_manager.cpp"
-/*#include "cron_scheduler/cron_scheduler.cpp"*/
 #include "ha_websocket/ha_websocket.cpp"
 #include "bmx280/bmx280.c"
 #include "ccs811/ccs811.cpp"
-#include "analogue_in/analogue_in.cpp"
-#include "sound_in_fft/sound_in_fft.cpp"
+//#include "analogue_in/analogue_in.cpp"
+//#include "sound_in_fft/sound_in_fft.cpp"
 #include "adc_periodic/adc_periodic.cpp"
 #include "sleep_manager/sleep_manager.cpp"
-#include "mcu_info/mcu_info.cpp"
-#include "led_ws2812b/led_ws2812b.h"
+//#include "mcu_info/mcu_info.cpp"
+//#include "utils/helpers.h"
+#include "sys_utils/sys_utils.h"
+//#include "led_ws2812b/led_ws2812b.h"
 #include "digio_manager/digio.h"
 #include "as5600/as5600.h"
 #include "hx711/hx711.h"
 #include "ds18b20/ds18b20.h"
 #include "tmstamp_measurement/tmstamp_measurement.h"
+
 
 
 
@@ -277,67 +291,67 @@ class bmx280_sensor{
     esp_err_t get_service_data_report(char *text_buffer, int16_t text_buffer_size, std::string bmx_label)
     {
 
-        Report_builder report;
+        // Report_builder report;
 
-        report.add_float_report_item(std::format("{}_temp", bmx_label), temperature, -40.0, 100.0);
-        report.add_float_report_item(std::format("{}_rh", bmx_label), humidity, 0.0, 100.0);
-        report.add_float_report_item(std::format("{}_atm", bmx_label), masl_pressure_mbar, 870.0, 1083.8);
-        report.add_float_report_item(std::format("{}_ah", bmx_label), absolute_humidity, 0.001, 65000.0);
-        report.add_float_report_item(std::format("{}_satah", bmx_label), saturation_humidity, 0.001, 65000.0);
+        // report.add_float_report_item(std::format("{}_temp", bmx_label), temperature, -40.0, 100.0);
+        // report.add_float_report_item(std::format("{}_rh", bmx_label), humidity, 0.0, 100.0);
+        // report.add_float_report_item(std::format("{}_atm", bmx_label), masl_pressure_mbar, 870.0, 1083.8);
+        // report.add_float_report_item(std::format("{}_ah", bmx_label), absolute_humidity, 0.001, 65000.0);
+        // report.add_float_report_item(std::format("{}_satah", bmx_label), saturation_humidity, 0.001, 65000.0);
 
-        /* @TODO: NOTE: this should work with no issue, because add_keyval deep copys, and only one thread that accesses it, but not a pretty solution.*/
+        // /* @TODO: NOTE: this should work with no issue, because add_keyval deep copys, and only one thread that accesses it, but not a pretty solution.*/
         
-        int16_t res = snprintf(text_buffer, text_buffer_size, "%s", report.get_service_data_buffer().c_str());
+        // int16_t res = snprintf(text_buffer, text_buffer_size, "%s", report.get_service_data_buffer().c_str());
 
-        if ((res < 0) || (res >= text_buffer_size))
-        {
-            return ESP_FAIL;
-        }
+        // if ((res < 0) || (res >= text_buffer_size))
+        // {
+        //     return ESP_FAIL;
+        // }
         return ESP_OK;
 
     }
 
-    esp_err_t add_to_report(Report_builder &report_buildr, uint8_t bmx_num)
-    {
-        char* keys[] = {
-        "bmx0_temp", "bmx0_rh", "bmx0_atm", "bmx0_ah", "bmx0_satah",
-        "bmx1_temp", "bmx1_rh", "bmx1_atm", "bmx1_ah", "bmx1_satah"};
+    // esp_err_t add_to_report(Report_builder &report_buildr, uint8_t bmx_num)
+    // {
+    //     char* keys[] = {
+    //     "bmx0_temp", "bmx0_rh", "bmx0_atm", "bmx0_ah", "bmx0_satah",
+    //     "bmx1_temp", "bmx1_rh", "bmx1_atm", "bmx1_ah", "bmx1_satah"};
 
-        report_buildr.add_keyval(Report_builder::tag_value_t{
-            .type = Type_e::FLOAT32,
-            .key = keys[0 + (5u * bmx_num)],
-            .value = (void*)&(temperature),
-            .group = Report_group_e::SENSOR_BMX
-        },{-40.0, 90.0});
+    //     report_buildr.add_keyval(Report_builder::tag_value_t{
+    //         .type = Type_e::FLOAT32,
+    //         .key = keys[0 + (5u * bmx_num)],
+    //         .value = (void*)&(temperature),
+    //         .group = Report_group_e::SENSOR_BMX
+    //     },{-40.0, 90.0});
 
-        report_buildr.add_keyval(Report_builder::tag_value_t{
-            .type = Type_e::FLOAT32,
-            .key = keys[1 + (5u * bmx_num)],
-            .value = (void*)&(humidity),
-            .group = Report_group_e::SENSOR_BMX
-        },{0.001, 100.0});
+    //     report_buildr.add_keyval(Report_builder::tag_value_t{
+    //         .type = Type_e::FLOAT32,
+    //         .key = keys[1 + (5u * bmx_num)],
+    //         .value = (void*)&(humidity),
+    //         .group = Report_group_e::SENSOR_BMX
+    //     },{0.001, 100.0});
 
-        report_buildr.add_keyval(Report_builder::tag_value_t{
-            .type = Type_e::FLOAT32,
-            .key = keys[2 + (5u * bmx_num)],
-            .value = (void*)&(masl_pressure_mbar),
-            .group = Report_group_e::SENSOR_BMX
-        },{870.0, 1083.8});
+    //     report_buildr.add_keyval(Report_builder::tag_value_t{
+    //         .type = Type_e::FLOAT32,
+    //         .key = keys[2 + (5u * bmx_num)],
+    //         .value = (void*)&(masl_pressure_mbar),
+    //         .group = Report_group_e::SENSOR_BMX
+    //     },{870.0, 1083.8});
 
-        report_buildr.add_keyval(Report_builder::tag_value_t{
-            .type = Type_e::FLOAT32,
-            .key = keys[3 + (5u * bmx_num)],
-            .value = (void*)&(absolute_humidity),
-            .group = Report_group_e::SENSOR_BMX
-        },{0.001, 65000.0});
+    //     report_buildr.add_keyval(Report_builder::tag_value_t{
+    //         .type = Type_e::FLOAT32,
+    //         .key = keys[3 + (5u * bmx_num)],
+    //         .value = (void*)&(absolute_humidity),
+    //         .group = Report_group_e::SENSOR_BMX
+    //     },{0.001, 65000.0});
 
-        report_buildr.add_keyval(Report_builder::tag_value_t{
-            .type = Type_e::FLOAT32,
-            .key = keys[4 + (5u * bmx_num)],
-            .value = (void*)&(saturation_humidity),
-            .group = Report_group_e::SENSOR_BMX
-        },{0.001, 65000.0});
+    //     report_buildr.add_keyval(Report_builder::tag_value_t{
+    //         .type = Type_e::FLOAT32,
+    //         .key = keys[4 + (5u * bmx_num)],
+    //         .value = (void*)&(saturation_humidity),
+    //         .group = Report_group_e::SENSOR_BMX
+    //     },{0.001, 65000.0});
         
-        return ESP_OK;
-    }
+    //     return ESP_OK;
+    // }
 };

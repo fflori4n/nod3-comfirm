@@ -1,16 +1,17 @@
 #include "esp_log.h"
 #include "esp_event.h"
+#include "websoc_credentials.h"
+
+constexpr char *ha_websoc_log_tag{COLOR_GRAY "HAWEBSOC" COLOR_WHITE};
+constexpr uint16_t request_txrxbuffer_len{2048};
+static char rxtx_buffer[request_txrxbuffer_len];
 
 
-static constexpr uint16_t txrx_buffer_size{2048};
-static char rxtx_buffer[txrx_buffer_size];
-
-#define WEBSOC_SENSOR_NAME "test_3nod_confirm"
 
 typedef struct {
     int data_len;    
     uint8_t op_code;                       
-    char rx_buffer[txrx_buffer_size];
+    char rx_buffer[request_txrxbuffer_len];
     bool processed;
   } esp_websocket_rx_data_t;
 
@@ -36,47 +37,38 @@ class Homeassistant_websocket
 {
 
 public:
-  static constexpr char *ha_websoc_log_tag{COLOR_GRAY "HAWEBSOC" COLOR_WHITE};
-  char* ha_websoc_header_template = "{\"id\":%%d,\"type\":\"call_service\",\"domain\":\"websoc_sensor\",\"service\":\""WEBSOC_SENSOR_NAME".set_values\",\"service_data\":{%s}}";
+  char* ha_websoc_header_template = "{\"id\":%%d,\"type\":\"call_service\",\"domain\":\""HA_INTEGRATION_DOMAIN"\",\"service\":\""HA_DEVICE_NAME".set_values\",\"service_data\":{%s}}";
 
 private:
-  /*static constexpr const char *ha_websoc_endpoint{"ws://192.168.1.199:8123/api/websocket"};*/
-  static constexpr const char *ha_websoc_endpoint{"ws://haserver.fflori4n.com/api/websocket"};
-  static constexpr const char *ha_websoc_token{"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJhNjY4OTk1ZGQ5Mzg0YWRiOGEwZTk1OGUxZmM0YWJlZiIsImlhdCI6MTcwNTI0MjcyOSwiZXhwIjoyMDIwNjAyNzI5fQ.VKxml-fWpsuBZExIHViE2WEg1ZqxDcbNFFKWJIyflhc"};
-
+  static constexpr const char *ha_websoc_endpoint{CRED_WEBSOCK_URL};
+  static constexpr const char *ha_websoc_token{CRED_WEBSOCK_HA_TOKEN};
   static constexpr const char *ha_websoc_auth_template{"{\"type\":\"auth\",\"access_token\":\"%s\"}"};
   static constexpr const char *ha_websoc_ping_template{"{\"id\":%d,\"type\":\"ping\"}"};
+  static constexpr const char *const dbgResultLabels[] = {"Response "COLOR_GREEN"OK"COLOR_GRAY, "Response "COLOR_RED"NEGATIVE"COLOR_GRAY, COLOR_RED"TIMEOUT"COLOR_GRAY, COLOR_RED"ERROR"COLOR_GRAY};
 
   static constexpr uint16_t poll_rx_buffer_ms{1};
-
-  static constexpr const char *const dbgResultLabels[] = {"Response "COLOR_GREEN"OK"COLOR_GRAY, "Response "COLOR_RED"NEGATIVE"COLOR_GRAY, COLOR_RED"TIMEOUT"COLOR_GRAY, COLOR_RED"ERROR"COLOR_GRAY};
 
 public:
   esp_websocket_client_config_t websocket_cfg = {};
   esp_websocket_client_handle_t websoc_client_handle;
-  uint16_t request_id = 1; /* this will be added into each JSON payload so HA can add it to response, has to be incremented with each msg sent */
-
   bool websoc_init_completed = false;
+  uint16_t request_id = 1; /* this will be added into each JSON payload so HA can add it to response, has to be incremented with each msg sent */
 
 private:
 
-  static const char* op_code_dbg(uint8_t op_code){
+  static const char* op_code_dbg(uint8_t op_code) {
 
-    const char* op_code_strings[] = {
-    "OP_COUNT",
-    "OP_TEXT",
-    "OP_BINARY",
-    "OP_CON_CLOSE",
-    "OP_PING",
-    "OP_PONG",
-    "OP_UNKNOWN"
-     };
+    static const std::array<const char*, 7> op_code_strings{
+      "OP_COUNT",
+      "OP_TEXT",
+      "OP_BINARY",
+      "OP_CON_CLOSE",
+      "OP_PING",
+      "OP_PONG",
+      "OP_UNKNOWN"
+    };
 
-    if((op_code >= 0) && (op_code < 6)){
-      return op_code_strings[op_code];
-    }
-
-    return op_code_strings[6];
+    return (op_code < 6) ? op_code_strings[op_code] : op_code_strings[6];
   }
 
   static void event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
