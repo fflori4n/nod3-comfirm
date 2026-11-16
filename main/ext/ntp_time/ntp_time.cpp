@@ -64,15 +64,7 @@ esp_err_t Ntp_time::sntp_init(const char* sntp_server_url, const uint32_t wait_s
     sntp_set_sync_mode(SNTP_SYNC_MODE_SMOOTH); /* smooth only if max diff is less than 35mins. good for drift*/
     sntp_set_sync_interval(sntp_sync_interval_ms);
 
-    if(ESP_OK == init_result){
-        ESP_LOGI("sntp", "Starting SNTP");
-        init_result = esp_netif_sntp_start();
-    }
-    else{
-        init_result = ESP_FAIL;
-    }
-    
-    if(ESP_OK == init_result){
+    if(true == Ntp_time::sntp_started){
 
         if(wait_sync > 0){
             ESP_LOGI("sntp", "Waiting for time sync...");
@@ -86,6 +78,19 @@ esp_err_t Ntp_time::sntp_init(const char* sntp_server_url, const uint32_t wait_s
     }
    
     return init_result;
+}
+
+inline void Ntp_time::start_sntp()
+{
+    if(false == Ntp_time::sntp_started)
+    {
+        ESP_LOGI("sntp", "Starting SNTP");
+        esp_err_t res = esp_netif_sntp_start();
+        if(ESP_OK == res)
+        {
+            Ntp_time::sntp_started = true;
+        }
+    }
 }
 
 

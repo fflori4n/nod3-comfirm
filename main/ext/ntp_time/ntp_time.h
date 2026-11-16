@@ -1,8 +1,19 @@
+#ifndef NTP_TIME_H
+#define NTP_TIME_H
+
 #include <esp_err.h>
 #include <esp_netif_sntp.h>
 #include <ctime>
 
 const char* rtc_time_sts_labels[] = {"ERROR", "OK", "NOT SYNCED - USABLE", "NOT SYNCED - NOT USABLE"};
+
+static inline uint32_t esp_timer_get_sec() {
+    return static_cast<uint32_t>(esp_timer_get_time() / 1000000LL);
+}
+
+// static inline uint32_t esp_rtc_timer_get_sec() {
+//     return static_cast<uint32_t>(esp_rtc_get_time_us() / 1000000ULL);
+// }
 
 class Ntp_time{
 
@@ -29,6 +40,8 @@ public:
     static inline char strftimeBuffer[64] = {'\0'};
     static inline struct tm tmCurrentTime = {0};
 
+    static inline bool sntp_started = false;
+
     typedef enum
     {
         Error,
@@ -36,8 +49,6 @@ public:
         Not_synced_usable,
         Not_synced_not_usable
     }rtc_time_sts_t;
-
-    
 
     static inline rtc_time_sts_t mcu_time_status = rtc_time_sts_t::Error;
 
@@ -56,6 +67,7 @@ public:
         
         static esp_err_t sntp_init(const char* sntp_server_url, const uint32_t wait_sync, const uint32_t auto_sync_period);
         void print_time(time_t& unix_time);
+        static void start_sntp(void);
         //static time_t getCurrentRTCTime(bool timeNonValidReturn);
 
         static time_t get_esp_rtc_time(void){ time(&(Ntp_time::rtc_current_time_unix)); return Ntp_time::rtc_current_time_unix;};
@@ -159,3 +171,5 @@ public:
             return {Ntp_time::rtc_current_time_unix, mcu_time_status, tmCurrentTime};
         }
 };
+
+#endif /* NTP_TIME_H */
